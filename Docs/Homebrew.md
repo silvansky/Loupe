@@ -5,7 +5,7 @@ Loupe should be distributed as a Homebrew tap formula.
 ## User Install
 
 ```bash
-brew tap heoblitz/loupe
+brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
 brew install loupe
 ```
 
@@ -14,7 +14,9 @@ not need to install AXe separately.
 
 ## Tap Layout
 
-Publish this formula in the tap repository:
+The current repository can be tapped directly with an explicit URL. If we later
+want the shorter `brew tap heoblitz/loupe` command, publish the same formula in
+the conventional tap repository:
 
 ```text
 heoblitz/homebrew-loupe
@@ -28,29 +30,18 @@ The canonical formula source in this repo is `Formula/loupe.rb`.
 
 1. Make the source archive public and immutable.
 2. Tag the release, for example `v0.1.0`.
-3. Replace the all-zero `sha256` in `Formula/loupe.rb`.
-4. Copy `Formula/loupe.rb` into `heoblitz/homebrew-loupe/Formula/loupe.rb`.
-5. Run:
+3. Replace the formula `sha256` with the release archive checksum.
+4. Run:
 
 ```bash
-brew tap heoblitz/loupe
+brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
 brew audit --strict --online heoblitz/loupe/loupe
 brew install --build-from-source heoblitz/loupe/loupe
 brew test heoblitz/loupe/loupe
 ```
 
-For local tap smoke testing before the public tap exists:
+## Current Status
 
-```bash
-brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
-brew install --HEAD heoblitz/loupe/loupe
-```
-
-That path still requires the GitHub URL to be reachable from the installing
-machine.
-
-## Current Blocker
-
-`Formula/loupe.rb` is tap-shaped and build-verified with a local archive, but it
-is not ready for a public stable `brew install` until the GitHub release archive
-is reachable and the real release checksum replaces the all-zero checksum.
+`v0.1.0` is public and the formula checksum is set. The formula has been
+build-verified with a local archive; run the tap install command above after
+pushing formula changes to verify the public tap path end to end.

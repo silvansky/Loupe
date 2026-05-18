@@ -5,7 +5,7 @@ Runtime E2E inspection and action harness for iOS Simulator apps.
 ## Install
 
 ```bash
-brew tap heoblitz/loupe
+brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
 brew install loupe
 ```
 
