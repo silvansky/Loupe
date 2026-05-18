@@ -94,6 +94,9 @@ compose.
 - Runtime selector resolution, waits, and action traces fetch `/accessibility`
   first, so they can use native accessibility elements when LoupeKit can see
   them and fall back to the snapshot-derived tree when it cannot.
+- `--trace-dir` writes `action-target.json` before dispatch and includes the
+  resolved target query result in action records, making selector choice,
+  coordinates, ref, role, text, visibility, and source tree auditable.
 - `Examples/LoupeExample/run-runtime-e2e.sh` verifies the XCTest-free runtime
   smoke path when AXe is installed.
 - `Examples/LoupeExample/run-axe-scenarios.sh` repeats AXe-backed navigation,
@@ -187,7 +190,7 @@ This keeps observation and action separated:
 ## Next Work
 
 1. Add native Loupe HID dispatch so action commands do not depend on AXe.
-2. Add action trace log capture and target query result details.
+2. Add runtime app log capture into action traces.
 3. Extend accessibility coverage for SwiftUI inner semantic elements.
 4. Add better selector scoring.
 5. Add screenshot baseline diff helpers.

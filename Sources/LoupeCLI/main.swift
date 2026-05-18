@@ -377,6 +377,15 @@ struct LoupeCLI {
             try await writePreActionTrace(command: command, options: options, traceDirectory: traceDirectory)
         }
         let target = try await resolveActionTarget(options)
+        if let traceDirectory = options.traceDirectory {
+            try writeActionRecord(
+                command: command,
+                options: options,
+                target: target,
+                phase: "target",
+                to: traceDirectory.appendingPathComponent("action-target.json")
+            )
+        }
         try dispatchAction(command: command, options: options, target: target)
         if let traceDirectory = options.traceDirectory {
             try await Task.sleep(nanoseconds: 250_000_000)
@@ -464,7 +473,8 @@ struct LoupeCLI {
                     point: point,
                     screen: snapshot.screen.size,
                     screenScale: snapshot.screen.scale,
-                    source: .accessibility(ref: result.ref, sourceRef: result.sourceRef)
+                    source: .accessibility(ref: result.ref, sourceRef: result.sourceRef),
+                    match: .accessibility(result)
                 )
             }
         }
@@ -480,7 +490,8 @@ struct LoupeCLI {
             point: point,
             screen: snapshot.screen.size,
             screenScale: snapshot.screen.scale,
-            source: .view(ref: result.ref)
+            source: .view(ref: result.ref),
+            match: .view(result)
         )
     }
 
@@ -596,6 +607,7 @@ struct LoupeCLI {
             resolvedPoint: target?.point,
             resolvedScreen: target?.screen,
             resolvedSource: target?.source.description,
+            resolvedTarget: target?.match?.trace,
             recordedAt: Date()
         )
         try writeJSON(record, to: url)
@@ -1697,6 +1709,7 @@ private struct LoupeCLIActionTrace: Codable {
     var resolvedPoint: LoupePoint?
     var resolvedScreen: LoupeSize?
     var resolvedSource: String?
+    var resolvedTarget: ActionTargetTrace?
     var recordedAt: Date
 }
 
@@ -1725,6 +1738,68 @@ private struct ActionTarget {
     var screen: LoupeSize
     var screenScale: Double
     var source: ActionTargetSource
+    var match: ActionTargetMatch? = nil
+}
+
+private enum ActionTargetMatch {
+    case accessibility(LoupeAccessibilityQueryResult)
+    case view(LoupeQueryResult)
+
+    var trace: ActionTargetTrace {
+        switch self {
+        case let .accessibility(result):
+            return ActionTargetTrace(
+                tree: "accessibility",
+                ref: result.ref,
+                sourceRef: result.sourceRef,
+                typeName: nil,
+                role: result.role,
+                testID: result.testID,
+                label: nil,
+                value: nil,
+                text: result.text,
+                frame: result.frame,
+                activationPoint: result.activationPoint,
+                isVisible: result.isVisible,
+                isEnabled: result.isEnabled,
+                isInteractive: result.isInteractive
+            )
+        case let .view(result):
+            return ActionTargetTrace(
+                tree: "view",
+                ref: result.ref,
+                sourceRef: nil,
+                typeName: nil,
+                role: result.role,
+                testID: result.testID,
+                label: nil,
+                value: nil,
+                text: result.text,
+                frame: result.frame,
+                activationPoint: nil,
+                isVisible: result.isVisible,
+                isEnabled: result.isEnabled,
+                isInteractive: result.isInteractive
+            )
+        }
+    }
+}
+
+private struct ActionTargetTrace: Codable {
+    var tree: String
+    var ref: String
+    var sourceRef: String?
+    var typeName: String?
+    var role: String?
+    var testID: String?
+    var label: String?
+    var value: String?
+    var text: String?
+    var frame: LoupeRect?
+    var activationPoint: LoupePoint?
+    var isVisible: Bool
+    var isEnabled: Bool
+    var isInteractive: Bool
 }
 
 private struct CLIError: Error, CustomStringConvertible {
