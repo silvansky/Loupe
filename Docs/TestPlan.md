@@ -38,6 +38,11 @@ harness.
 - Runtime identity handshake:
   `loupe runtime --udid <sim>` verifies that the contacted Loupe host belongs to
   the expected simulator before recorder commands use it.
+- Recorder replay loop:
+  `loupe record-start <alias>`, direct user or CLI interaction,
+  `loupe record-stop --output <recording.json>`, app relaunch, then
+  `loupe replay <recording.json> --host <url> --udid <sim>` uses recorded
+  selector candidates before coordinate fallback.
 - Basic action traces:
   `--trace-dir <path>` saves before/after view snapshots, accessibility trees,
   runtime logs, screenshots, action records, and the resolved target query result

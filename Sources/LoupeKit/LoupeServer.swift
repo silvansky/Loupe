@@ -145,7 +145,9 @@ public final class LoupeServer: @unchecked Sendable {
             }
         case "/recording/start":
             do {
-                let data = try makeLoupeJSONEncoder().encode(LoupeRuntime.shared.startRecording())
+                let data = try makeLoupeJSONEncoder().encode(
+                    LoupeRuntime.shared.startRecording(alias: request.queryItems["alias"])
+                )
                 return ResponsePayload(status: 200, body: String(decoding: data, as: UTF8.self))
             } catch {
                 return ResponsePayload(status: 500, body: errorBody("recording_start_failed", error: error))

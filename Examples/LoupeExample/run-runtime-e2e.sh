@@ -70,8 +70,14 @@ grep -q '"simulatorUDID"' "$RUNTIME_PATH"
 curl -sS "$HOST/snapshot" > "$SNAPSHOT_PATH"
 grep -q '"uiKit"' "$SNAPSHOT_PATH"
 grep -q '"accessibility"' "$SNAPSHOT_PATH"
+read -r WIDTH HEIGHT < <(ruby -rjson -e '
+  snapshot = JSON.parse(File.read(ARGV.fetch(0)))
+  size = snapshot.fetch("screen").fetch("size")
+  puts [size.fetch("width"), size.fetch("height")].join(" ")
+' "$SNAPSHOT_PATH")
 
-.build/debug/loupe record-start --host "$HOST" --udid "$DEVICE" >/tmp/loupe-record-start.json
+.build/debug/loupe record-start customer-detail --host "$HOST" --udid "$DEVICE" >/tmp/loupe-record-start.json
+grep -q '"alias" : "customer-detail"' /tmp/loupe-record-start.json
 
 .build/debug/loupe tap \
   --host "$HOST" \
@@ -97,6 +103,24 @@ grep -q '"events"' "$RECORDING_PATH"
 grep -q '"kind" : "touch"' "$RECORDING_PATH"
 grep -q '"appIdentity"' "$RECORDING_PATH"
 grep -q '"simulatorUDID"' "$RECORDING_PATH"
+grep -q '"alias" : "customer-detail"' "$RECORDING_PATH"
+grep -q '"targetCandidates"' "$RECORDING_PATH"
+grep -q '"selector"' "$RECORDING_PATH"
+
+xcrun simctl terminate "$DEVICE" dev.loupe.example >/dev/null 2>&1 || true
+.build/debug/loupe launch \
+  --device "$DEVICE" \
+  --bundle-id dev.loupe.example \
+  --inject \
+  --env LOUPE_PORT="$PORT" >/dev/null
+sleep 2
+
+.build/debug/loupe replay "$RECORDING_PATH" \
+  --host "$HOST" \
+  --udid "$DEVICE" \
+  --width "$WIDTH" \
+  --height "$HEIGHT"
+.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.detail --timeout 5 >/tmp/loupe-runtime-replay-detail.json
 
 echo "runtime E2E smoke passed"
 echo "runtime: $RUNTIME_PATH"

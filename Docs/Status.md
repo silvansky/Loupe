@@ -86,6 +86,11 @@ compose.
 - `/runtime` includes a launch identity with bundle id, process id,
   `SIMULATOR_UDID`, simulator name, and a Loupe launch id. Recordings persist
   that identity as `appIdentity`.
+- Recordings can carry a user-facing `alias`, set with
+  `loupe record-start <alias>` or `loupe record-start --alias <alias>`.
+- Touch recording enriches began events with ranked selector candidates from
+  the accessibility tree and view tree. `loupe replay` resolves those selectors
+  in the current app state before falling back to recorded coordinates.
 - `loupe tap`, `swipe`, `drag`, `pinch`, `type`, `screenshot`, `record-start`,
   `record-stop`, `recording`, `logs`, and `replay` are available as CLI
   commands.

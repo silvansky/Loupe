@@ -14,6 +14,7 @@ struct RuntimeTests {
         )
         let recording = LoupeRecording(
             id: "recording-1",
+            alias: "checkout-flow",
             startedAt: Date(timeIntervalSince1970: 1),
             endedAt: Date(timeIntervalSince1970: 2),
             appIdentity: identity,
@@ -23,7 +24,21 @@ struct RuntimeTests {
                     kind: .touch,
                     timestamp: Date(timeIntervalSince1970: 3),
                     phase: .began,
-                    points: [LoupePoint(x: 10, y: 20)]
+                    points: [LoupePoint(x: 10, y: 20)],
+                    targetCandidates: [
+                        LoupeRecordedTargetCandidate(
+                            tree: "accessibility",
+                            selector: LoupeRecordedSelector(kind: .testID, value: "checkout.pay"),
+                            ref: "ax-n1",
+                            sourceRef: "n1",
+                            role: "button",
+                            testID: "checkout.pay",
+                            text: "Pay",
+                            frame: LoupeRect(x: 0, y: 0, width: 100, height: 44),
+                            activationPoint: LoupePoint(x: 50, y: 22),
+                            score: 105
+                        )
+                    ]
                 )
             ]
         )
@@ -37,7 +52,9 @@ struct RuntimeTests {
         let decoded = try decoder.decode(LoupeRecording.self, from: data)
 
         #expect(decoded == recording)
+        #expect(decoded.alias == "checkout-flow")
         #expect(decoded.appIdentity?.simulatorUDID == "SIM-1")
+        #expect(decoded.events.first?.targetCandidates.first?.selector.value == "checkout.pay")
     }
 
     @Test func snapshotNodeCanCarryUIKitAndAccessibilityProperties() {

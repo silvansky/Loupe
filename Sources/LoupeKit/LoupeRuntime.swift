@@ -26,12 +26,16 @@ public final class LoupeRuntime {
         )
     }
 
-    public func startRecording(showControls: Bool = true) -> LoupeRecording {
+    public func startRecording(alias: String? = nil, showControls: Bool = true) -> LoupeRecording {
         installEventHookIfNeeded()
-        let recording = LoupeRecording(appIdentity: identity)
+        let recording = LoupeRecording(alias: nonEmpty(alias), appIdentity: identity)
         self.recording = recording
         completedRecording = nil
-        log(level: "info", "recording_started", metadata: ["id": .string(recording.id)])
+        var metadata: [String: LoupeMetadataValue] = ["id": .string(recording.id)]
+        if let alias = recording.alias {
+            metadata["alias"] = .string(alias)
+        }
+        log(level: "info", "recording_started", metadata: metadata)
 
         if showControls {
             showRecordingControls()
@@ -94,6 +98,9 @@ public final class LoupeRuntime {
             guard let window = touch.window else {
                 return nil
             }
+            guard window !== overlayWindow else {
+                return nil
+            }
             let point = window.convert(touch.location(in: window), to: nil)
             return LoupePoint(x: Double(point.x), y: Double(point.y))
         }
@@ -106,9 +113,99 @@ public final class LoupeRuntime {
             LoupeRuntimeEvent(
                 kind: .touch,
                 phase: touches.first.map(touchPhase),
-                points: points
+                points: points,
+                targetCandidates: recordedTargetCandidates(for: points.first, phase: touches.first.map(touchPhase))
             )
         )
+    }
+
+    private func recordedTargetCandidates(
+        for point: LoupePoint?,
+        phase: LoupeTouchPhase?
+    ) -> [LoupeRecordedTargetCandidate] {
+        guard phase == .began, let point else {
+            return []
+        }
+
+        let agent = LoupeAgent()
+        let snapshot = agent.captureSnapshot()
+        let accessibilityTree = agent.captureAccessibilityTree()
+        var candidates: [LoupeRecordedTargetCandidate] = []
+
+        candidates.append(contentsOf: accessibilityCandidates(at: point, in: accessibilityTree))
+        candidates.append(contentsOf: viewCandidates(at: point, in: snapshot))
+
+        var seen = Set<String>()
+        return candidates
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score {
+                    return lhs.score > rhs.score
+                }
+                return area(lhs.frame) < area(rhs.frame)
+            }
+            .filter { candidate in
+                let key = "\(candidate.tree):\(candidate.selector.kind.rawValue):\(candidate.selector.role ?? ""):\(candidate.selector.value)"
+                guard !seen.contains(key) else {
+                    return false
+                }
+                seen.insert(key)
+                return true
+            }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    private func accessibilityCandidates(
+        at point: LoupePoint,
+        in tree: LoupeAccessibilityTree
+    ) -> [LoupeRecordedTargetCandidate] {
+        tree.nodes.values.compactMap { node in
+            guard node.isVisible, contains(point, in: node.frame), let selector = recordedSelector(
+                testID: node.testID,
+                role: node.role,
+                text: LoupeAccessibilityTreeQuery.displayText(for: node),
+                ref: node.ref
+            ) else {
+                return nil
+            }
+
+            return LoupeRecordedTargetCandidate(
+                tree: "accessibility",
+                selector: selector,
+                ref: node.ref,
+                sourceRef: node.sourceRef,
+                role: node.role,
+                testID: node.testID,
+                text: LoupeAccessibilityTreeQuery.displayText(for: node),
+                frame: node.frame,
+                activationPoint: node.activationPoint,
+                score: recordedSelectorScore(selector, role: node.role, isInteractive: node.isInteractive)
+            )
+        }
+    }
+
+    private func viewCandidates(at point: LoupePoint, in snapshot: LoupeSnapshot) -> [LoupeRecordedTargetCandidate] {
+        snapshot.nodes.values.compactMap { node in
+            guard node.isVisible, contains(point, in: node.frame), let selector = recordedSelector(
+                testID: node.testID,
+                role: node.role,
+                text: LoupeObservationCompactor.displayText(for: node),
+                ref: node.ref
+            ) else {
+                return nil
+            }
+
+            return LoupeRecordedTargetCandidate(
+                tree: "view",
+                selector: selector,
+                ref: node.ref,
+                role: node.role,
+                testID: node.testID,
+                text: LoupeObservationCompactor.displayText(for: node),
+                frame: node.frame,
+                score: recordedSelectorScore(selector, role: node.role, isInteractive: node.isInteractive)
+            )
+        }
     }
 
     private func appendRuntimeEvent(_ event: LoupeRuntimeEvent) {
@@ -198,6 +295,62 @@ private func touchPhase(_ touch: UITouch) -> LoupeTouchPhase {
     @unknown default:
         return .cancelled
     }
+}
+
+private func recordedSelector(
+    testID: String?,
+    role: String?,
+    text: String?,
+    ref: String
+) -> LoupeRecordedSelector? {
+    if let testID = nonEmpty(testID) {
+        return LoupeRecordedSelector(kind: .testID, value: testID)
+    }
+    if let role = nonEmpty(role), let text = nonEmpty(text) {
+        return LoupeRecordedSelector(kind: .roleAndText, value: text, role: role, exact: true)
+    }
+    if let text = nonEmpty(text) {
+        return LoupeRecordedSelector(kind: .text, value: text, exact: true)
+    }
+    return LoupeRecordedSelector(kind: .ref, value: ref)
+}
+
+private func recordedSelectorScore(_ selector: LoupeRecordedSelector, role: String?, isInteractive: Bool) -> Int {
+    let base: Int
+    switch selector.kind {
+    case .testID:
+        base = 100
+    case .roleAndText:
+        base = 70
+    case .text:
+        base = 50
+    case .ref:
+        base = 10
+    }
+    let interactiveBonus = isInteractive ? 5 : 0
+    let containerPenalty = ["tableView", "collectionView", "scrollView", "tabBar"].contains(role ?? "") ? 20 : 0
+    return base + interactiveBonus - containerPenalty
+}
+
+private func contains(_ point: LoupePoint, in rect: LoupeRect?) -> Bool {
+    guard let rect, !rect.isEmpty else {
+        return false
+    }
+    return point.x >= rect.x && point.x <= rect.maxX && point.y >= rect.y && point.y <= rect.maxY
+}
+
+private func area(_ rect: LoupeRect?) -> Double {
+    guard let rect else {
+        return Double.greatestFiniteMagnitude
+    }
+    return max(0, rect.width) * max(0, rect.height)
+}
+
+private func nonEmpty(_ value: String?) -> String? {
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+        return nil
+    }
+    return trimmed
 }
 
 private extension UIApplication {

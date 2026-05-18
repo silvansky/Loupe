@@ -27,7 +27,12 @@ struct LoupeCLI {
         case "recording":
             try await runtimeFetch(arguments, path: "/recording", usage: "loupe recording [--host <url>] [--udid <sim>] [--output <path>]")
         case "record-start":
-            try await runtimeFetch(arguments, path: "/recording/start", usage: "loupe record-start [--host <url>] [--udid <sim>] [--output <path>]")
+            try await runtimeFetch(
+                arguments,
+                path: "/recording/start",
+                usage: "loupe record-start [alias] [--alias <name>] [--host <url>] [--udid <sim>] [--output <path>]",
+                allowsAlias: true
+            )
         case "record-stop":
             try await runtimeFetch(arguments, path: "/recording/stop", usage: "loupe record-stop [--host <url>] [--udid <sim>] [--output <path>]")
         case "runtime":
@@ -37,7 +42,7 @@ struct LoupeCLI {
         case "launch":
             try launch(arguments)
         case "replay":
-            try replay(arguments)
+            try await replay(arguments)
         case "screenshot":
             try screenshot(arguments)
         case "subtree":
@@ -354,12 +359,22 @@ struct LoupeCLI {
         )
     }
 
-    private static func runtimeFetch(_ arguments: [String], path: String, usage: String) async throws {
-        let options = try RuntimeFetchOptions(arguments, usage: usage)
+    private static func runtimeFetch(
+        _ arguments: [String],
+        path: String,
+        usage: String,
+        allowsAlias: Bool = false
+    ) async throws {
+        let options = try RuntimeFetchOptions(arguments, usage: usage, allowsAlias: allowsAlias)
         if let udid = options.udid {
             try await validateRuntimeIdentity(host: options.host, expectedUDID: udid)
         }
-        let url = options.host.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        var url = options.host.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        if let alias = options.alias {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "alias", value: alias)]
+            url = components?.url ?? url
+        }
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw CLIError("runtime fetch expected an HTTP response")
@@ -439,7 +454,7 @@ struct LoupeCLI {
         }
     }
 
-    private static func replay(_ arguments: [String]) throws {
+    private static func replay(_ arguments: [String]) async throws {
         let options = try ReplayOptions(arguments)
         let data = try Data(contentsOf: options.recordingURL)
         let decoder = JSONDecoder()
@@ -452,7 +467,8 @@ struct LoupeCLI {
             actionOptions.endPoint = action.endPoint
             actionOptions.startSpread = action.startSpread
             actionOptions.endSpread = action.endSpread
-            try dispatchAction(command: action.command, options: actionOptions, target: action.target)
+            let target = try await replayTarget(for: action, options: options)
+            try dispatchAction(command: action.command, options: actionOptions, target: target)
         }
     }
 
@@ -882,7 +898,8 @@ struct LoupeCLI {
                             target: ActionTarget(point: center, screen: screen, screenScale: 1, source: .coordinates),
                             endPoint: nil,
                             startSpread: startSpread,
-                            endSpread: endSpread
+                            endSpread: endSpread,
+                            selector: nil
                         )
                     )
                 } else if let move = lastMove, let movePoint = move.points.first, distance(first, movePoint) > 4 || distance(first, last) > 4 {
@@ -892,7 +909,8 @@ struct LoupeCLI {
                             target: ActionTarget(point: first, screen: screen, screenScale: 1, source: .coordinates),
                             endPoint: last,
                             startSpread: nil,
-                            endSpread: nil
+                            endSpread: nil,
+                            selector: nil
                         )
                     )
                 } else {
@@ -902,7 +920,8 @@ struct LoupeCLI {
                             target: ActionTarget(point: first, screen: screen, screenScale: 1, source: .coordinates),
                             endPoint: nil,
                             startSpread: nil,
-                            endSpread: nil
+                            endSpread: nil,
+                            selector: start.targetCandidates.first.flatMap(loupeSelector)
                         )
                     )
                 }
@@ -914,6 +933,58 @@ struct LoupeCLI {
         }
 
         return actions
+    }
+
+    private static func replayTarget(for action: ReplayAction, options: ReplayOptions) async throws -> ActionTarget {
+        guard let selector = action.selector else {
+            return action.target
+        }
+
+        do {
+            let snapshot = try await fetchSnapshot(host: options.host)
+            let accessibilityTree = try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot)
+            if let result = LoupeAccessibilityTreeQuery.first(selector, in: accessibilityTree),
+               let point = result.activationPoint ?? center(of: result.frame) {
+                return ActionTarget(
+                    point: point,
+                    screen: snapshot.screen.size,
+                    screenScale: snapshot.screen.scale,
+                    source: .accessibility(ref: result.ref, sourceRef: result.sourceRef),
+                    match: .accessibility(result)
+                )
+            }
+            if let result = LoupeSnapshotQuery.first(selector, in: snapshot),
+               let point = center(of: result.frame) {
+                return ActionTarget(
+                    point: point,
+                    screen: snapshot.screen.size,
+                    screenScale: snapshot.screen.scale,
+                    source: .view(ref: result.ref),
+                    match: .view(result)
+                )
+            }
+        } catch {
+            FileHandle.standardError.write(Data("warning: replay selector resolution failed: \(error)\n".utf8))
+        }
+
+        FileHandle.standardError.write(Data("warning: replay falling back to recorded coordinates\n".utf8))
+        return action.target
+    }
+
+    private static func loupeSelector(from candidate: LoupeRecordedTargetCandidate) -> LoupeSelector? {
+        switch candidate.selector.kind {
+        case .testID:
+            return .testID(candidate.selector.value)
+        case .text:
+            return .text(candidate.selector.value, exact: candidate.selector.exact)
+        case .roleAndText:
+            guard let role = candidate.selector.role else {
+                return .text(candidate.selector.value, exact: candidate.selector.exact)
+            }
+            return .roleAndText(role: role, text: candidate.selector.value, exact: candidate.selector.exact)
+        case .ref:
+            return .ref(candidate.selector.value)
+        }
     }
 
     private static func run(_ process: Process, label: String) throws {
@@ -1525,19 +1596,22 @@ private struct ReplayAction {
     var endPoint: LoupePoint?
     var startSpread: Double?
     var endSpread: Double?
+    var selector: LoupeSelector?
 }
 
 private struct ReplayOptions {
     var recordingURL: URL
+    var host: URL
     var screen: LoupeSize
     var actionOptions: ReplayActionOptions
 
     init(_ arguments: [String]) throws {
         guard let path = arguments.first, !path.hasPrefix("--") else {
-            throw CLIError("Usage: loupe replay <recording.json> --udid <sim> --width <points> --height <points> [--backend auto|axe]")
+            throw CLIError("Usage: loupe replay <recording.json> --udid <sim> --width <points> --height <points> [--host <url>] [--backend auto|axe]")
         }
 
         recordingURL = URL(fileURLWithPath: path)
+        var host = URL(string: "http://127.0.0.1:8765")!
         var backend = "auto"
         var udid = "booted"
         var width: Double?
@@ -1546,6 +1620,8 @@ private struct ReplayOptions {
 
         while index < arguments.count {
             switch arguments[index] {
+            case "--host":
+                host = try Self.url(after: "--host", in: arguments, index: &index)
             case "--backend":
                 backend = try Self.value(after: "--backend", in: arguments, index: &index)
             case "--udid", "--device":
@@ -1564,6 +1640,7 @@ private struct ReplayOptions {
             throw CLIError("replay requires --width and --height in device points")
         }
 
+        self.host = host
         screen = LoupeSize(width: width, height: height)
         actionOptions = ReplayActionOptions(
             backend: backend,
@@ -1593,20 +1670,32 @@ private struct ReplayOptions {
         }
         return value
     }
+
+    private static func url(after option: String, in arguments: [String], index: inout Int) throws -> URL {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let url = URL(string: raw) else {
+            throw CLIError("Invalid URL for \(option): \(raw)")
+        }
+        return url
+    }
 }
 
 private struct RuntimeFetchOptions {
     var host: URL
     var udid: String?
+    var alias: String?
     var outputURL: URL?
 
-    init(_ arguments: [String], usage: String) throws {
+    init(_ arguments: [String], usage: String, allowsAlias: Bool = false) throws {
         host = URL(string: "http://127.0.0.1:8765")!
         var udid: String?
+        var alias: String?
         var outputURL: URL?
         var index = 0
         while index < arguments.count {
             switch arguments[index] {
+            case let value where allowsAlias && !value.hasPrefix("--") && alias == nil:
+                alias = value
             case "--host":
                 let raw = try Self.value(after: "--host", in: arguments, index: &index)
                 guard let url = URL(string: raw) else {
@@ -1615,6 +1704,11 @@ private struct RuntimeFetchOptions {
                 host = url
             case "--udid", "--device":
                 udid = try Self.value(after: arguments[index], in: arguments, index: &index)
+            case "--alias", "--name":
+                guard allowsAlias else {
+                    throw CLIError("Unknown runtime option: \(arguments[index])")
+                }
+                alias = try Self.value(after: arguments[index], in: arguments, index: &index)
             case "--output":
                 outputURL = URL(fileURLWithPath: try Self.value(after: "--output", in: arguments, index: &index))
             case "--help", "-h":
@@ -1625,6 +1719,7 @@ private struct RuntimeFetchOptions {
             index += 1
         }
         self.udid = udid
+        self.alias = alias
         self.outputURL = outputURL
     }
 

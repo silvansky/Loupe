@@ -13,12 +13,76 @@ public enum LoupeTouchPhase: String, Codable, Equatable {
     case cancelled
 }
 
+public enum LoupeRecordedSelectorKind: String, Codable, Equatable {
+    case testID
+    case text
+    case roleAndText
+    case ref
+}
+
+public struct LoupeRecordedSelector: Codable, Equatable {
+    public var kind: LoupeRecordedSelectorKind
+    public var value: String
+    public var role: String?
+    public var exact: Bool
+
+    public init(
+        kind: LoupeRecordedSelectorKind,
+        value: String,
+        role: String? = nil,
+        exact: Bool = true
+    ) {
+        self.kind = kind
+        self.value = value
+        self.role = role
+        self.exact = exact
+    }
+}
+
+public struct LoupeRecordedTargetCandidate: Codable, Equatable {
+    public var tree: String
+    public var selector: LoupeRecordedSelector
+    public var ref: String
+    public var sourceRef: String?
+    public var role: String?
+    public var testID: String?
+    public var text: String?
+    public var frame: LoupeRect?
+    public var activationPoint: LoupePoint?
+    public var score: Int
+
+    public init(
+        tree: String,
+        selector: LoupeRecordedSelector,
+        ref: String,
+        sourceRef: String? = nil,
+        role: String? = nil,
+        testID: String? = nil,
+        text: String? = nil,
+        frame: LoupeRect? = nil,
+        activationPoint: LoupePoint? = nil,
+        score: Int
+    ) {
+        self.tree = tree
+        self.selector = selector
+        self.ref = ref
+        self.sourceRef = sourceRef
+        self.role = role
+        self.testID = testID
+        self.text = text
+        self.frame = frame
+        self.activationPoint = activationPoint
+        self.score = score
+    }
+}
+
 public struct LoupeRuntimeEvent: Codable, Equatable {
     public var id: String
     public var kind: LoupeRuntimeEventKind
     public var timestamp: Date
     public var phase: LoupeTouchPhase?
     public var points: [LoupePoint]
+    public var targetCandidates: [LoupeRecordedTargetCandidate]
     public var message: String?
 
     public init(
@@ -27,6 +91,7 @@ public struct LoupeRuntimeEvent: Codable, Equatable {
         timestamp: Date = Date(),
         phase: LoupeTouchPhase? = nil,
         points: [LoupePoint] = [],
+        targetCandidates: [LoupeRecordedTargetCandidate] = [],
         message: String? = nil
     ) {
         self.id = id
@@ -34,6 +99,7 @@ public struct LoupeRuntimeEvent: Codable, Equatable {
         self.timestamp = timestamp
         self.phase = phase
         self.points = points
+        self.targetCandidates = targetCandidates
         self.message = message
     }
 }
@@ -87,6 +153,7 @@ public struct LoupeRuntimeIdentity: Codable, Equatable {
 
 public struct LoupeRecording: Codable, Equatable {
     public var id: String
+    public var alias: String?
     public var startedAt: Date
     public var endedAt: Date?
     public var appIdentity: LoupeRuntimeIdentity?
@@ -94,12 +161,14 @@ public struct LoupeRecording: Codable, Equatable {
 
     public init(
         id: String = UUID().uuidString,
+        alias: String? = nil,
         startedAt: Date = Date(),
         endedAt: Date? = nil,
         appIdentity: LoupeRuntimeIdentity? = nil,
         events: [LoupeRuntimeEvent] = []
     ) {
         self.id = id
+        self.alias = alias
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.appIdentity = appIdentity
