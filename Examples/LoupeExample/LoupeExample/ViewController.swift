@@ -340,6 +340,8 @@ final class DetailViewController: UIViewController {
 }
 
 final class ComponentsViewController: UIViewController {
+    private let presentAlertAfterAppear: Bool
+    private var didPresentInitialAlert = false
     private let scrollView = UIScrollView()
     private let symbolImageView = UIImageView()
     private let stateSwitch = UISwitch()
@@ -368,6 +370,15 @@ final class ComponentsViewController: UIViewController {
     private let componentTiles = ["Label", "Image", "Control", "Input", "List"]
     private let pickerRows = ["North", "South", "West"]
 
+    init(presentAlertAfterAppear: Bool = false) {
+        self.presentAlertAfterAppear = presentAlertAfterAppear
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -392,6 +403,15 @@ final class ComponentsViewController: UIViewController {
         view.accessibilityIdentifier = "example.components"
         configureControls()
         layoutControls()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard presentAlertAfterAppear, !didPresentInitialAlert else {
+            return
+        }
+        didPresentInitialAlert = true
+        showAlert()
     }
 
     private func configureControls() {
@@ -669,6 +689,19 @@ final class ComponentTileCell: UICollectionViewCell {
 }
 
 final class FixtureTabController: UITabBarController {
+    private let initialSelectedIndex: Int
+    private let autoFocusKeyboard: Bool
+
+    init(initialSelectedIndex: Int = 0, autoFocusKeyboard: Bool = false) {
+        self.initialSelectedIndex = initialSelectedIndex
+        self.autoFocusKeyboard = autoFocusKeyboard
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -686,9 +719,16 @@ final class FixtureTabController: UITabBarController {
         viewControllers = [
             fixtureController(SwiftUIFixtureController(), title: "SwiftUI", symbol: "sparkles", id: "swiftui", tag: 0),
             fixtureController(WebFixtureController(), title: "Web", symbol: "globe", id: "web", tag: 1),
-            fixtureController(KeyboardFixtureController(), title: "Keyboard", symbol: "keyboard", id: "keyboard", tag: 2),
+            fixtureController(
+                KeyboardFixtureController(autoFocusFirstField: autoFocusKeyboard),
+                title: "Keyboard",
+                symbol: "keyboard",
+                id: "keyboard",
+                tag: 2
+            ),
             fixtureController(NestedScrollFixtureController(), title: "Nested", symbol: "rectangle.stack", id: "nested", tag: 3),
         ]
+        selectedIndex = initialSelectedIndex
     }
 
     private func fixtureController(
@@ -796,11 +836,21 @@ final class WebFixtureController: UIViewController {
 }
 
 final class KeyboardFixtureController: UIViewController {
+    private let autoFocusFirstField: Bool
     private let firstNameField = UITextField()
     private let emailField = UITextField()
     private let codeField = UITextField()
     private let notesView = UITextView()
     private let resultLabel = UILabel()
+
+    init(autoFocusFirstField: Bool = false) {
+        self.autoFocusFirstField = autoFocusFirstField
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -809,6 +859,13 @@ final class KeyboardFixtureController: UIViewController {
         view.accessibilityIdentifier = "example.fixtures.keyboard"
         configureControls()
         layoutControls()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if autoFocusFirstField {
+            firstNameField.becomeFirstResponder()
+        }
     }
 
     private func configureControls() {

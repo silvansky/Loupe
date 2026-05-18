@@ -108,15 +108,23 @@ public final class LoupeServer: @unchecked Sendable {
     }
 
     private func responsePayload(for request: HTTPRequest) -> ResponsePayload {
+        if request.path == "/health" {
+            return ResponsePayload(status: 200, body: #"{"status":"ok","name":"LoupeKit"}"#)
+        }
+
         let box = ResponseBox()
         let semaphore = DispatchSemaphore(value: 0)
 
-        Task { @MainActor in
-            box.payload = self.response(for: request)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                box.payload = self.response(for: request)
+            }
             semaphore.signal()
         }
 
-        semaphore.wait()
+        guard semaphore.wait(timeout: .now() + 10) == .success else {
+            return ResponsePayload(status: 503, body: #"{"error":"main_actor_timeout"}"#)
+        }
         return box.payload ?? ResponsePayload(status: 500, body: #"{"error":"empty_response"}"#)
     }
 

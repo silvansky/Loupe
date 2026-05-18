@@ -50,9 +50,8 @@ compose.
   localhost.
 - `LoupeKit` can expose `/inspect?testID=...` for a full node with parent,
   sibling, and child summaries, `/subtree?testID=...&depth=...` for bounded
-  subtree inspection, `/accessibility` for an accessibility tree that merges
-  view-derived nodes with native `UIAccessibility` container traversal, and
-  `/audit` for machine-readable layout issues.
+  subtree inspection, `/accessibility` for a view-derived accessibility tree,
+  and `/audit` for machine-readable layout issues.
 - `LoupeInjector` can be built as a simulator-only injected library.
 - `loupe launch --inject` can launch the example app with
   `DYLD_INSERT_LIBRARIES` through `simctl`.
@@ -99,10 +98,21 @@ compose.
   notifications. See `Docs/RuntimeCommunication.md`.
 - `loupe tap`, `swipe`, `drag`, `pinch`, `type`, `screenshot`, `record-start`,
   `record-stop`, `recording`, `logs`, and `replay` are available as CLI
-  commands.
+  commands. `loupe tap` intentionally rejects text selectors and accepts stable
+  `testID`, `ref`, or explicit coordinates.
 - `loupe runtime`, `logs`, `record-start`, `record-stop`, and `recording` accept
   `--udid` and validate that the connected Loupe host belongs to that simulator
   before mutating or reading runtime recorder state.
+- `loupe launch --inject` assigns a stable per-simulator localhost port when
+  `LOUPE_PORT` is not provided, records it under `~/.loupe/runtimes`, and waits
+  for the injected runtime before returning. Later CLI commands can resolve the
+  host from `--udid`.
+- `loupe fetch`, runtime fetches, screenshots, and AXe-backed actions have
+  bounded timeouts.
+- `loupe runtimes` / `loupe apps` lists known injected runtime hosts from
+  `~/.loupe/runtimes` and probes live runtime state when available.
+- `loupe tree` prints a human-readable view-tree or accessibility-tree prefix
+  from either a saved snapshot or a live injected runtime.
 - Runtime actions currently delegate HID dispatch to AXe.
 - Selector-based runtime actions resolve through the accessibility tree first,
   using a valid accessibility activation point when it lies inside the element
@@ -116,10 +126,20 @@ compose.
   coordinates, ref, role, text, visibility, and source tree auditable.
 - `--trace-dir` also captures `before-logs.json` and `after-logs.json` from the
   injected SDK `/logs` endpoint.
+- Failed runtime actions now auto-save a trace under `/tmp/loupe-traces` even
+  when `--trace-dir` was not provided.
+- `loupe wait-for-gone` and `loupe wait-for-value` cover disappearance and
+  nested property checks in addition to `wait-for-visible`.
+- `loupe record start <alias>`, `loupe record stop`, `loupe recordings`, and
+  `loupe replay <alias>` provide the alias-based recorder loop.
 - `Examples/LoupeExample/run-runtime-e2e.sh` verifies the XCTest-free runtime
   smoke path when AXe is installed.
-- `Examples/LoupeExample/run-axe-scenarios.sh` repeats AXe-backed navigation,
+- `Examples/LoupeExample/run-axe-scenarios.sh` repeats AXe-backed tap, gesture,
   accessibility-tree, UIKit component inspection, and layout audit scenarios.
+- `Examples/LoupeExample/run-bookmark-e2e.sh` verifies a bookmark app-style
+  tabbed list/detail/favorites/search/add flow with text-tap rejection,
+  automatic failure trace, `testID` tap, `ref` tap, type, wait-for-value,
+  wait-for-gone, inspect, observation, and audit checks.
 - `Examples/LoupeExample/run-injected.sh` verifies injection, health, snapshot,
   and query.
 - `Examples/LoupeExample` now includes `UILaunchStoryboardName` and
@@ -128,8 +148,9 @@ compose.
 - The example app now includes navigation, a large table view, a detail screen,
   a pan gesture target, a UIKit component screen with scroll, collection,
   picker, tab, alert, and design fixtures, a mixed fixture tab controller with
-  SwiftUI host, WebKit, keyboard-heavy form, and nested scroll screens, and a
-  modal form.
+  SwiftUI host, WebKit, keyboard-heavy form, and nested scroll screens, a
+  bookmark app-style tabbed list/detail/favorites/search/add route with detail
+  favorite state changes, and a modal form.
 - `testNavigationListFormAndGestures` verifies normal XCUITest navigation,
   table scrolling, form input, and gesture behavior.
 - `run-loupe-driven-ui-test.sh` verifies the key proof: fetch Loupe snapshot,
@@ -142,6 +163,8 @@ Loupe now exposes initial CLI action commands:
 
 ```bash
 loupe tap --test-id example.customer.24
+loupe tap --ref n83
+loupe tap --x 201 --y 274 --udid booted
 loupe swipe --from 219,760 --to 219,190 --width 438 --height 954
 loupe drag --from 88,420 --to 372,420 --width 438 --height 954
 loupe inspect snapshot.json --test-id example.components.switch
@@ -149,8 +172,10 @@ loupe accessibility snapshot.json
 loupe query snapshot.json --tree accessibility --test-id example.components.switch
 loupe audit snapshot.json
 loupe subtree snapshot.json --test-id example.components --depth 4
+loupe tree --udid booted --accessibility --depth 2
 loupe wait-for-visible --test-id example.detail --timeout 5
-loupe tap --test-id example.form.name
+loupe wait-for-gone --test-id example.loading --timeout 5
+loupe wait-for-value --test-id example.components.switch --key uiKit.switch.isOn --equals true
 loupe type "Ada"
 ```
 
@@ -161,10 +186,12 @@ still need `axe` on `PATH` for local runtime scripts. `loupe pinch` keeps the
 intended command shape, but AXe does not support pinch yet. A native
 `LoupeActionRunner` HID backend is still future work.
 
-Native accessibility traversal currently uses public in-app `UIAccessibility`
-container APIs. It enriches UIKit and custom accessibility containers, but
-SwiftUI inner `accessibilityIdentifier` values are intentionally selector-usable
-only when the app process exposes them as addressable accessibility nodes.
+Native accessibility traversal through public in-app `UIAccessibility` container
+APIs is currently opt-in with `LOUPE_NATIVE_ACCESSIBILITY=1`; the default
+runtime path uses the view-derived accessibility tree because native traversal
+can block the app main thread on current simulators. SwiftUI inner
+`accessibilityIdentifier` values are intentionally selector-usable only when the
+app process exposes them as addressable accessibility nodes.
 
 The legacy action proof is implemented in
 `Examples/LoupeExample/LoupeExampleUITests/LoupeExampleUITests.swift` using
@@ -180,6 +207,8 @@ interactions are normally driven.
 The public Loupe E2E path should be runtime-driven: a user or agent should be
 able to launch an app, fetch observations, and execute `tap`, `swipe`, `drag`,
 and `type` through Loupe commands without creating or running XCTest cases.
+Tap-by-text remains out of the public contract because text is ambiguous and
+fragile.
 
 The desired structure is:
 
@@ -233,6 +262,10 @@ Examples/LoupeExample/run-runtime-e2e.sh
 
 ```bash
 Examples/LoupeExample/run-axe-scenarios.sh
+```
+
+```bash
+Examples/LoupeExample/run-bookmark-e2e.sh
 ```
 
 ```bash

@@ -74,6 +74,8 @@ loupe tap --test-id checkout.payButton
 The current proof for this flow lives in the example UI test and
 `Examples/LoupeExample/run-loupe-driven-ui-test.sh`, but that proof should be
 productized into Loupe CLI runtime actions rather than kept as the architecture.
+The public `loupe tap` command supports stable selectors and coordinates, but
+not text selectors.
 
 ## Observation Policy
 
@@ -110,7 +112,7 @@ Implemented on-demand detail tools:
 Functional E2E:
 
 ```swift
-tap(ref)
+futureTap(ref)
 type(ref, text)
 swipe(ref, direction)
 waitForVisible(testID)

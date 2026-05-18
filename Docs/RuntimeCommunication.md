@@ -5,9 +5,15 @@ HTTP to `127.0.0.1`. The CLI talks to that local server with `--host`; it uses
 `--udid` only to validate that the contacted server belongs to the expected
 simulator.
 
-The default port is `8765`. Keep it for the single-simulator case. For multiple
-simulators or multiple injected apps, launch each app with a different
-`LOUPE_PORT` and pass the matching `--host` to CLI commands.
+The SDK default port is `8765`. The CLI launch path is stricter: when
+`loupe launch --inject` is used without `LOUPE_PORT`, it assigns a stable
+per-simulator localhost port, stores the mapping under `~/.loupe/runtimes`, and
+waits for `/runtime` before returning. Later commands can pass `--udid` and omit
+`--host`.
+
+For fixed-port workflows, launch with `--env LOUPE_PORT=<port>`. If that port is
+already serving a Loupe runtime for another simulator, launch fails with a port
+collision error instead of silently talking to the wrong app.
 
 HTTPS is not required for this path. Loupe is not making the app call an
 external service; the host CLI is calling the app's loopback server inside the

@@ -44,8 +44,9 @@ Run the XCTest-free Loupe runtime smoke harness:
 ```
 
 This launches the injected app, verifies richer UIKit/accessibility snapshot
-fields, starts recording, performs a CLI tap through AXe, captures a screenshot,
-stops recording, and verifies that touch events were recorded.
+fields, starts recording, performs a drag through the public Loupe action
+surface, captures a screenshot, stops recording, and verifies that touch events
+were recorded.
 
 Run the AXe scenario harness:
 
@@ -53,11 +54,25 @@ Run the AXe scenario harness:
 ./run-axe-scenarios.sh
 ```
 
-This repeats navigation push/pop by gesture and synthetic `UIBarButtonItem`
-selector nodes, verifies `wait-for-visible`, bounded `subtree`, accessibility
-tree export/query, action traces, compact UIKit class identity, full
-component-specific properties, mixed fixture tabs, text input, WebKit
-inspection, nested scroll inspection, and the layout audit output path.
+This repeats routed navigation fixtures, gesture pop, synthetic `UIBarButtonItem`
+selector node inspection, `wait-for-visible`, bounded `subtree`, accessibility
+tree export/query, compact UIKit class identity, full component-specific
+properties, mixed fixture tabs, text input, WebKit inspection, nested scroll
+inspection, and the layout audit output path.
+
+Run the bookmark app-style E2E harness:
+
+```bash
+./run-bookmark-e2e.sh
+```
+
+This launches the bookmark route, verifies the tab bar plus list observation,
+prints view/accessibility tree previews, blocks text-based tap, captures an
+automatic failure trace, opens detail by `testID`, checks and toggles favorite
+state with `wait-for-value`, returns by `ref`, types into the add form, saves a
+new bookmark, waits for the editor to disappear, switches to Favorites, opens
+another detail screen, switches to Search, types a query, and audits the
+resulting view tree.
 
 Run the legacy Loupe-driven coordinate action proof:
 

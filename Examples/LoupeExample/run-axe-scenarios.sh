@@ -57,14 +57,6 @@ APP_PATH="$(
 xcrun simctl install "$DEVICE" "$APP_PATH"
 xcrun simctl terminate "$DEVICE" dev.loupe.example >/dev/null 2>&1 || true
 
-.build/debug/loupe launch \
-  --device "$DEVICE" \
-  --bundle-id dev.loupe.example \
-  --inject \
-  --env LOUPE_PORT="$PORT" >/dev/null
-
-sleep 2
-
 HOST="http://127.0.0.1:$PORT"
 SNAPSHOT_PATH="/tmp/loupe-axe-snapshot.json"
 OBSERVATION_PATH="/tmp/loupe-axe-observation.json"
@@ -74,8 +66,24 @@ AUDIT_PATH="/tmp/loupe-axe-audit.json"
 SUBTREE_PATH="/tmp/loupe-axe-subtree.json"
 TRACE_DIR="/tmp/loupe-axe-trace"
 
+launch_app() {
+  local route="${1:-}"
+  xcrun simctl terminate "$DEVICE" dev.loupe.example >/dev/null 2>&1 || true
+  local arguments=(
+    --device "$DEVICE"
+    --bundle-id dev.loupe.example
+    --inject
+    --env "LOUPE_PORT=$PORT"
+  )
+  if [[ -n "$route" ]]; then
+    arguments+=(--env "LOUPE_EXAMPLE_ROUTE=$route")
+  fi
+  .build/debug/loupe launch "${arguments[@]}" >/dev/null
+  sleep 2
+}
+
 fetch_snapshot() {
-  curl -sS "$HOST/snapshot" > "$SNAPSHOT_PATH"
+  .build/debug/loupe fetch "$HOST/snapshot" --timeout 10 --output "$SNAPSHOT_PATH"
 }
 
 assert_query() {
@@ -85,6 +93,13 @@ assert_query() {
   grep -q '"ref"' "$output_path"
 }
 
+query_ref() {
+  local test_id="$1"
+  .build/debug/loupe query "$SNAPSHOT_PATH" --test-id "$test_id" --max-results 1 |
+    ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch(0).fetch("ref")'
+}
+
+launch_app
 fetch_snapshot
 read -r WIDTH HEIGHT < <(ruby -rjson -e '
   snapshot = JSON.parse(File.read(ARGV.fetch(0)))
@@ -94,22 +109,9 @@ read -r WIDTH HEIGHT < <(ruby -rjson -e '
 MID_Y="$(ruby -e 'puts (ARGV.fetch(0).to_f * 0.45).round' "$HEIGHT")"
 END_X="$(ruby -e 'puts (ARGV.fetch(0).to_f - 24).round' "$WIDTH")"
 
-echo "case: navigation push by tap, pop by interactive edge drag"
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.customer.1 --trace-dir "$TRACE_DIR"
+echo "case: navigation pop by interactive edge drag from routed detail screen"
+launch_app detail
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id example.detail --timeout 5 >/tmp/loupe-axe-wait-detail.json
-test -f "$TRACE_DIR/before-snapshot.json"
-test -f "$TRACE_DIR/after-snapshot.json"
-test -f "$TRACE_DIR/before-accessibility.json"
-test -f "$TRACE_DIR/after-accessibility.json"
-test -f "$TRACE_DIR/before-logs.json"
-test -f "$TRACE_DIR/after-logs.json"
-test -f "$TRACE_DIR/action-before.json"
-test -f "$TRACE_DIR/action-target.json"
-test -f "$TRACE_DIR/action-after.json"
-grep -q '"phase" : "target"' "$TRACE_DIR/action-target.json"
-grep -q '"resolvedTarget"' "$TRACE_DIR/action-target.json"
-test -f "$TRACE_DIR/before.png"
-test -f "$TRACE_DIR/after.png"
 fetch_snapshot
 assert_query example.detail /tmp/loupe-axe-detail-query.json
 .build/debug/loupe drag --udid "$DEVICE" --from "4,$MID_Y" --to "$END_X,$MID_Y" --duration 0.8
@@ -117,24 +119,30 @@ assert_query example.detail /tmp/loupe-axe-detail-query.json
 fetch_snapshot
 assert_query example.customerList /tmp/loupe-axe-list-query.json
 
-echo "case: navigation push and pop by tappable bar button"
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.openComponents
-sleep 1
+echo "case: navigation push by testID tap, then pop by ref tap"
+launch_app
+.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.openComponents --trace-dir "$TRACE_DIR"
+.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.components --timeout 5 >/tmp/loupe-axe-wait-components.json
 fetch_snapshot
 assert_query example.components /tmp/loupe-axe-components-query.json
+test -f "$TRACE_DIR/action-target.json"
+grep -q '"phase" : "target"' "$TRACE_DIR/action-target.json"
+grep -q '"resolvedTarget"' "$TRACE_DIR/action-target.json"
 .build/debug/loupe subtree "$SNAPSHOT_PATH" --test-id example.components --depth 4 > "$SUBTREE_PATH"
 grep -q '"root"' "$SUBTREE_PATH"
 grep -q '"example.components.switch"' "$SUBTREE_PATH"
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.components.back
-sleep 1
+BACK_REF="$(query_ref example.components.back)"
+.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --ref "$BACK_REF"
+.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.customerList --timeout 5 >/tmp/loupe-axe-wait-list-after-ref-tap.json
+
+echo "case: routed UIKit component screen"
+launch_app components
+.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.components --timeout 5 >/tmp/loupe-axe-wait-components-routed.json
 fetch_snapshot
-assert_query example.customerList /tmp/loupe-axe-list-after-back-query.json
 
 echo "case: UIKit component compact and inspect coverage"
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.openComponents
-sleep 1
-curl -sS "$HOST/observation" > "$OBSERVATION_PATH"
-curl -sS "$HOST/accessibility" > "$ACCESSIBILITY_PATH"
+.build/debug/loupe fetch "$HOST/observation" --timeout 5 --output "$OBSERVATION_PATH"
+.build/debug/loupe fetch "$HOST/accessibility" --timeout 5 --output "$ACCESSIBILITY_PATH"
 grep -q '"sourceRef"' "$ACCESSIBILITY_PATH"
 grep -q '"example.components.switch"' "$ACCESSIBILITY_PATH"
 grep -q '"className" : "UISwitch"' "$OBSERVATION_PATH"
@@ -214,9 +222,7 @@ grep -q '"issueCount"' "$AUDIT_PATH"
 grep -q '"issues"' "$AUDIT_PATH"
 
 echo "case: mixed fixture tabs for SwiftUI, WebKit, keyboard, and nested scroll"
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.components.back
-.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.customerList --timeout 5 >/tmp/loupe-axe-wait-list-before-fixtures.json
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.openFixtures
+launch_app fixtures
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id example.fixtures --timeout 5 >/tmp/loupe-axe-wait-fixtures.json
 fetch_snapshot
 assert_query example.fixtures /tmp/loupe-axe-fixtures-query.json
@@ -225,7 +231,7 @@ assert_query example.fixtures.tab.web /tmp/loupe-axe-web-tab-query.json
 assert_query example.fixtures.tab.keyboard /tmp/loupe-axe-keyboard-tab-query.json
 assert_query example.fixtures.tab.nested /tmp/loupe-axe-nested-tab-query.json
 
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.fixtures.tab.web
+launch_app fixtures.web
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id example.fixtures.web.webView --timeout 5 >/tmp/loupe-axe-wait-web.json
 fetch_snapshot
 .build/debug/loupe inspect "$SNAPSHOT_PATH" --test-id example.fixtures.web.webView > "$INSPECT_PATH"
@@ -234,9 +240,8 @@ grep -q '"role" : "webView"' "$INSPECT_PATH"
 grep -q '"webView"' "$INSPECT_PATH"
 grep -q '"url" : "https:\\/\\/loupe.local\\/fixture"' "$INSPECT_PATH"
 
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.fixtures.tab.keyboard
+launch_app fixtures.keyboard
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id example.fixtures.keyboard.firstName --timeout 5 >/tmp/loupe-axe-wait-keyboard.json
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.fixtures.keyboard.firstName
 .build/debug/loupe type "Ada" --udid "$DEVICE"
 fetch_snapshot
 .build/debug/loupe inspect "$SNAPSHOT_PATH" --test-id example.fixtures.keyboard.firstName > "$INSPECT_PATH"
@@ -244,7 +249,7 @@ grep -q '"className" : "UITextField"' "$INSPECT_PATH"
 grep -q '"text" : "Ada"' "$INSPECT_PATH"
 grep -q '"isFirstResponder" : true' "$INSPECT_PATH"
 
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.fixtures.tab.nested
+launch_app fixtures.nested
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id example.fixtures.nested.outerScroll --timeout 5 >/tmp/loupe-axe-wait-nested.json
 fetch_snapshot
 .build/debug/loupe inspect "$SNAPSHOT_PATH" --test-id example.fixtures.nested.horizontalScroll > "$INSPECT_PATH"
@@ -252,12 +257,8 @@ grep -q '"className" : "UIScrollView"' "$INSPECT_PATH"
 grep -q '"role" : "scrollView"' "$INSPECT_PATH"
 assert_query example.fixtures.nested.tile.0 /tmp/loupe-axe-nested-tile-query.json
 
-echo "case: alert presentation by tap"
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.fixtures.back
-.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.customerList --timeout 5 >/tmp/loupe-axe-wait-list-before-alert.json
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.openComponents
-.build/debug/loupe wait-for-visible --host "$HOST" --test-id example.components --timeout 5 >/tmp/loupe-axe-wait-components-before-alert.json
-.build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id example.components.alertButton
+echo "case: routed alert presentation"
+launch_app components.alert
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id example.components.alert --timeout 5 >/tmp/loupe-axe-wait-alert.json
 fetch_snapshot
 assert_query example.components.alert /tmp/loupe-axe-alert-query.json

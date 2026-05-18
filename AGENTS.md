@@ -31,9 +31,9 @@ Use this file as a map, not as a full manual. Keep deeper project state in
 - Use the view tree for UI/layout/style validation. Use the accessibility tree
   first for movement and input; selector actions should only fall back to view
   frames when no accessibility match exists.
-- The CLI should eventually expose `tap`, `swipe`, `drag`, and `type`, but those
-  commands currently delegate low-level HID dispatch to AXe until a native Loupe
-  HID backend exists.
+- The CLI currently exposes `tap`, `swipe`, `drag`, and `type`. Tap by text
+  should stay out of the public interface; use `testID`, `ref`, or coordinates
+  for tap.
 - Keep full snapshots on disk. Send compact observations to agents by default,
   then query or inspect specific refs on demand.
 - Prefer stable `testID` / `accessibilityIdentifier` selectors over text or
@@ -54,11 +54,17 @@ Verify simulator injection and observation:
 Examples/LoupeExample/run-injected.sh
 ```
 
-Verify AXe-backed runtime navigation, accessibility tree export/query, UIKit
+Verify AXe-backed runtime gestures, accessibility tree export/query, UIKit
 component inspection, and layout audit:
 
 ```bash
 Examples/LoupeExample/run-axe-scenarios.sh
+```
+
+Verify the bookmark app-style E2E route:
+
+```bash
+Examples/LoupeExample/run-bookmark-e2e.sh
 ```
 
 Verify the legacy UIKit XCTest example flow:
@@ -81,7 +87,8 @@ Examples/LoupeExample/run-loupe-driven-ui-test.sh
 
 ## Known Boundary
 
-`loupe tap` / `loupe swipe` / `loupe drag` / `loupe type` exist as runtime
-commands. They depend on AXe for HID dispatch for now. `loupe pinch` keeps the
-intended API shape, but AXe does not support pinch yet. The current UI test
+`loupe tap`, `loupe swipe`, `loupe drag`, and `loupe type` exist as runtime
+commands. They depend on AXe for HID dispatch for now. `loupe tap` supports
+`testID`, `ref`, and coordinates, but not text selectors. `loupe pinch` keeps
+the intended API shape, but AXe does not support pinch yet. The current UI test
 remains a legacy proof only.

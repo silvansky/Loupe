@@ -60,6 +60,9 @@ public final class LoupeAgent {
 
     public func captureAccessibilityTree() -> LoupeAccessibilityTree {
         let capture = captureSnapshotWithViewRefs()
+        guard ProcessInfo.processInfo.environment["LOUPE_NATIVE_ACCESSIBILITY"] == "1" else {
+            return LoupeAccessibilityTree.build(from: capture.snapshot)
+        }
         return captureNativeAccessibilityTree(snapshot: capture.snapshot, viewRefs: capture.viewRefs)
     }
 

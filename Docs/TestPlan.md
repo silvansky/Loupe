@@ -12,9 +12,12 @@ harness.
   `Examples/LoupeExample/run-runtime-e2e.sh`
 - AXe-backed repeated scenarios:
   `Examples/LoupeExample/run-axe-scenarios.sh`
-- Navigation push by Loupe selector tap.
+- Bookmark app-style E2E scenario:
+  `Examples/LoupeExample/run-bookmark-e2e.sh`
 - Navigation pop by interactive edge gesture.
-- Navigation push/pop by tappable control.
+- Navigation push by Loupe selector tap.
+- Navigation pop by Loupe ref tap.
+- Routed fixtures for UIKit components, alerts, and mixed fixture tabs.
 - Full-screen iPhone Simulator sizing through `LaunchScreen.storyboard`.
 - Compact observation with interactive UIKit type/class identity.
 - Separate view and accessibility trees:
@@ -23,9 +26,10 @@ harness.
 - Accessibility tree export and query:
   `loupe accessibility <snapshot.json>`, `loupe query --tree accessibility`,
   and `/accessibility`.
-- Runtime `/accessibility` merges Loupe's view-derived accessibility tree with
-  native `UIAccessibility` container traversal for non-UIView accessibility
-  elements, with the view tree as the fallback source of truth.
+- Runtime `/accessibility` returns Loupe's view-derived accessibility tree by
+  default, with native `UIAccessibility` container traversal kept behind
+  `LOUPE_NATIVE_ACCESSIBILITY=1` while its simulator blocking behavior is
+  stabilized.
 - On-demand full node inspection:
   `loupe inspect <snapshot.json> --test-id <id>`
 - Runtime inspection endpoint:
@@ -34,7 +38,13 @@ harness.
   `loupe subtree <snapshot.json> --test-id <id> --depth <n>` and
   `/subtree?testID=<id>&depth=<n>`
 - Runtime waiting:
-  `loupe wait-for-visible --test-id <id> --timeout <seconds>`
+  `loupe wait-for-visible --test-id <id> --timeout <seconds>`,
+  `loupe wait-for-gone --test-id <id>`, and
+  `loupe wait-for-value --test-id <id> --key <path> --equals <value>`.
+- Human-readable tree preview:
+  `loupe tree [snapshot.json] --view|--accessibility --depth <n>`.
+- Runtime registry:
+  `loupe runtimes` / `loupe apps` lists known simulator hosts and live state.
 - Runtime identity handshake:
   `loupe runtime --udid <sim>` verifies that the contacted Loupe host belongs to
   the expected simulator before recorder commands use it.
@@ -42,14 +52,17 @@ harness.
   apps can post `dev.loupe.log` and `dev.loupe.viewMetadata` notifications to
   send custom logs and metadata without importing `LoupeKit`.
 - Recorder replay loop:
-  `loupe record-start <alias>`, direct user or CLI interaction,
-  `loupe record-stop --output <recording.json>`, app relaunch, then
-  `loupe replay <recording.json> --host <url> --udid <sim>` uses recorded
-  selector candidates before coordinate fallback.
-- Basic action traces:
+  `loupe record start <alias>`, direct user or CLI interaction,
+  `loupe record stop` saves `~/.loupe/recordings/<alias>.json`, app relaunch,
+  then `loupe replay <alias> --host <url> --udid <sim>` uses recorded selector
+  candidates before coordinate fallback.
+- Basic action traces for public CLI actions:
   `--trace-dir <path>` saves before/after view snapshots, accessibility trees,
   runtime logs, screenshots, action records, and the resolved target query result
   around CLI actions.
+- Failed runtime actions automatically save `error.json`, failure snapshot,
+  accessibility tree, logs, screenshot, and action record under
+  `/tmp/loupe-traces`.
 - Basic layout audit:
   `loupe audit <snapshot.json>` and `/audit`
 - Layout audit currently checks sibling overlap, child-outside-parent,
@@ -65,6 +78,10 @@ harness.
   a SwiftUI hosting screen, a `WKWebView`, a keyboard-heavy form, nested scroll
   views, and a full `UITabBarController` flow with synthetic `UITabBarItem`
   selectors.
+- Bookmark app-style coverage for:
+  tab bar navigation, list/detail navigation, favorites, search, add form text
+  input, detail favorite state changes, `testID` tap, `ref` tap, text-tap
+  rejection, automatic failure trace, selector inspection, and layout audit.
 - Style capture for:
   background color, text color, border color, border width, corner radius,
   font name, and font size.
@@ -72,6 +89,8 @@ harness.
 ## Known Gaps
 
 - `loupe pinch` is still unsupported by the AXe backend.
+- `loupe tap` intentionally rejects text selectors; `testID`, `ref`, and
+  coordinate taps remain in the public contract.
 - `loupe audit` does not yet assert spacing, alignment, z-order intent,
   clipping, truncation, or typography rules.
 - Compact observations expose UIKit identity, but component-specific properties
@@ -79,11 +98,9 @@ harness.
 - `inspect` returns `UIView`-common properties at `uiKit` top level and
   component-specific properties under nested objects such as `uiKit.stepper`,
   `uiKit.textField`, `uiKit.tabBar`, and `uiKit.webView`.
-- Retry policies beyond explicit `wait-for-visible` polling are not implemented
-  yet.
-- Native `UIAccessibility` traversal depends on what the app process exposes
-  through public accessibility APIs; some framework-provided semantic nodes may
-  still require host-side accessibility tooling.
+- Retry policies beyond explicit wait commands are not implemented yet.
+- Native `UIAccessibility` traversal is opt-in and still needs guardrails before
+  it can be part of the default runtime endpoint.
 - Screenshot baseline diffing is not implemented yet.
 - AXe is the only action backend. Native Loupe HID dispatch is still future
   work.

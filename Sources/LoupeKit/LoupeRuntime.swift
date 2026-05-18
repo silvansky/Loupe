@@ -142,7 +142,7 @@ public final class LoupeRuntime {
 
         let agent = LoupeAgent()
         let snapshot = agent.captureSnapshot()
-        let accessibilityTree = agent.captureAccessibilityTree()
+        let accessibilityTree = LoupeAccessibilityTree.build(from: snapshot)
         var candidates: [LoupeRecordedTargetCandidate] = []
 
         candidates.append(contentsOf: accessibilityCandidates(at: point, in: accessibilityTree))

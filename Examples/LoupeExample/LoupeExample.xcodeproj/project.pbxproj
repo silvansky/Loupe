@@ -11,6 +11,7 @@
 		A10000000000000000000002 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* SceneDelegate.swift */; };
 		A10000000000000000000003 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ViewController.swift */; };
 		A10000000000000000000004 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* LaunchScreen.storyboard */; };
+		A10000000000000000000005 /* BookmarkViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* BookmarkViewController.swift */; };
 		B10000000000000000000001 /* LoupeExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* LoupeExampleUITests.swift */; };
 /* End PBXBuildFile section */
 
@@ -31,6 +32,7 @@
 		A10000000000000000000013 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000015 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A10000000000000000000016 /* BookmarkViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkViewController.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* LoupeExampleUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LoupeExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000011 /* LoupeExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoupeExampleUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -68,6 +70,7 @@
 				A10000000000000000000011 /* AppDelegate.swift */,
 				A10000000000000000000012 /* SceneDelegate.swift */,
 				A10000000000000000000013 /* ViewController.swift */,
+				A10000000000000000000016 /* BookmarkViewController.swift */,
 				A10000000000000000000014 /* Info.plist */,
 				A10000000000000000000015 /* LaunchScreen.storyboard */,
 			);
@@ -192,6 +195,7 @@
 				A10000000000000000000001 /* AppDelegate.swift in Sources */,
 				A10000000000000000000002 /* SceneDelegate.swift in Sources */,
 				A10000000000000000000003 /* ViewController.swift in Sources */,
+				A10000000000000000000005 /* BookmarkViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

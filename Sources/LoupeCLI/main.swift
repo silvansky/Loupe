@@ -3,7 +3,16 @@ import LoupeCore
 
 @main
 struct LoupeCLI {
-    static func main() async throws {
+    static func main() async {
+        do {
+            try await runMain()
+        } catch {
+            FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+            Foundation.exit(1)
+        }
+    }
+
+    private static func runMain() async throws {
         var arguments = Array(CommandLine.arguments.dropFirst())
         let command = arguments.isEmpty ? "help" : arguments.removeFirst()
 
@@ -20,12 +29,18 @@ struct LoupeCLI {
             try await fetch(arguments)
         case "logs":
             try await runtimeFetch(arguments, path: "/logs", usage: "loupe logs [--host <url>] [--udid <sim>] [--output <path>]")
+        case "apps", "runtimes":
+            try await runtimes(arguments)
         case "injector-path":
             try injectorPath(arguments)
         case "inspect":
             try inspect(arguments)
         case "recording":
             try await runtimeFetch(arguments, path: "/recording", usage: "loupe recording [--host <url>] [--udid <sim>] [--output <path>]")
+        case "record":
+            try await record(arguments)
+        case "recordings":
+            try await record(["list"] + arguments)
         case "record-start":
             try await runtimeFetch(
                 arguments,
@@ -40,17 +55,23 @@ struct LoupeCLI {
         case "query":
             try query(arguments)
         case "launch":
-            try launch(arguments)
+            try await launch(arguments)
         case "replay":
             try await replay(arguments)
         case "screenshot":
             try screenshot(arguments)
         case "subtree":
             try subtree(arguments)
+        case "tree":
+            try await tree(arguments)
         case "tap", "swipe", "drag", "pinch", "type":
             try await action(command: command, arguments: arguments)
         case "wait-for-visible":
-            try await waitForVisible(arguments)
+            try await waitFor(arguments, mode: .visible)
+        case "wait-for-gone":
+            try await waitFor(arguments, mode: .gone)
+        case "wait-for-value":
+            try await waitFor(arguments, mode: .value)
         case "help", "--help", "-h":
             printHelp()
         default:
@@ -175,6 +196,49 @@ struct LoupeCLI {
         FileHandle.standardOutput.write(Data("\n".utf8))
     }
 
+    private static func tree(_ arguments: [String]) async throws {
+        let options = try TreeOptions(arguments)
+        let snapshot: LoupeSnapshot
+        let accessibilityTree: LoupeAccessibilityTree?
+
+        if let snapshotURL = options.snapshotURL {
+            let data = try Data(contentsOf: snapshotURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            snapshot = try decoder.decode(LoupeSnapshot.self, from: data)
+            accessibilityTree = options.tree == .accessibility
+                ? LoupeAccessibilityTree.build(from: snapshot, includeHidden: options.includeHidden)
+                : nil
+        } else {
+            let host = try await resolvedRuntimeHost(
+                requestedHost: options.host,
+                hostWasExplicit: options.hostWasExplicit,
+                udid: options.udid
+            )
+            if let udid = options.udid {
+                try await validateRuntimeIdentity(host: host, expectedUDID: udid, timeout: options.timeout)
+            }
+            snapshot = try await fetchSnapshot(host: host, timeout: options.timeout)
+            accessibilityTree = options.tree == .accessibility
+                ? try await fetchAccessibilityTree(host: host, fallbackSnapshot: snapshot, timeout: options.timeout)
+                : nil
+        }
+
+        let output: String
+        switch options.tree {
+        case .view:
+            output = renderViewTree(snapshot, selector: options.selector, depth: options.depth, includeHidden: options.includeHidden)
+        case .accessibility:
+            output = renderAccessibilityTree(
+                accessibilityTree ?? LoupeAccessibilityTree.build(from: snapshot, includeHidden: options.includeHidden),
+                selector: options.selector,
+                depth: options.depth,
+                includeHidden: options.includeHidden
+            )
+        }
+        print(output)
+    }
+
     private static func audit(_ arguments: [String]) throws {
         let options = try AuditOptions(arguments)
         let data = try Data(contentsOf: options.snapshotURL)
@@ -197,12 +261,22 @@ struct LoupeCLI {
         FileHandle.standardOutput.write(Data("\n".utf8))
     }
 
-    private static func launch(_ arguments: [String]) throws {
+    private static func launch(_ arguments: [String]) async throws {
         let options = try LaunchOptions(arguments)
         var environment = options.environment
+        var runtimeUDID: String?
+        var runtimeHost: URL?
 
         if options.shouldInject, let dylibPath = try resolvedInjectorPath(explicitPath: options.dylibPath) {
             environment["DYLD_INSERT_LIBRARIES"] = dylibPath
+            let udid = try resolveSimulatorUDID(options.device)
+            let port = try resolvedLoupePort(for: udid, environment: environment)
+            let host = URL(string: "http://127.0.0.1:\(port)")!
+            try validateLaunchPort(host: host, expectedUDID: udid, expectedBundleID: options.bundleID)
+            environment["LOUPE_PORT"] = String(port)
+            runtimeUDID = udid
+            runtimeHost = host
+            terminateAppIfRunning(device: udid, bundleID: options.bundleID)
         }
 
         let request = SimctlLaunchRequest(
@@ -216,11 +290,12 @@ struct LoupeCLI {
         process.arguments = SimctlCommandBuilder.launchArguments(for: request)
         process.environment = SimctlCommandBuilder.launchEnvironment(for: request)
 
-        try process.run()
-        process.waitUntilExit()
+        try run(process, label: "simctl launch", timeout: options.timeout)
 
-        guard process.terminationStatus == 0 else {
-            throw CLIError("simctl launch exited with status \(process.terminationStatus)")
+        if let runtimeUDID, let runtimeHost {
+            try await waitForRuntime(host: runtimeHost, expectedUDID: runtimeUDID, timeout: options.timeout)
+            try storeRuntimeHost(udid: runtimeUDID, bundleID: options.bundleID, host: runtimeHost)
+            print("loupe host: \(runtimeHost.absoluteString)")
         }
     }
 
@@ -272,7 +347,7 @@ struct LoupeCLI {
 
     private static func fetch(_ arguments: [String]) async throws {
         let options = try FetchOptions(arguments)
-        let (data, response) = try await URLSession.shared.data(from: options.url)
+        let (data, response) = try await httpData(from: options.url, timeout: options.timeout, label: "fetch")
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw CLIError("fetch expected an HTTP response")
@@ -305,11 +380,14 @@ struct LoupeCLI {
               doctor
                   Check local Loupe installation and injector discovery.
 
-              fetch <url> [--output <path>]
+              fetch <url> [--output <path>] [--timeout <seconds>]
                   Fetch a probe endpoint such as http://127.0.0.1:8765/observation.
 
-              logs [--host <url>] [--udid <sim>] [--output <path>]
+              logs [--host <url>] [--udid <sim>] [--output <path>] [--timeout <seconds>]
                   Fetch runtime logs emitted by the injected Loupe SDK.
+
+              runtimes|apps [--json]
+                  List known injected Loupe runtimes, hosts, bundles, and live status.
 
               injector-path
                   Print the LoupeInjector executable path used for simulator injection.
@@ -320,6 +398,9 @@ struct LoupeCLI {
               subtree <snapshot.json> (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--depth <n>]
                   Print a bounded subtree rooted at a matched node.
 
+              tree [snapshot.json] [--host <url>] [--udid <sim>] [--view|--accessibility] [--depth <n>]
+                  Print a human-readable view or accessibility tree prefix.
+
               audit <snapshot.json> [--tolerance <points>] [--min-overlap-area <points2>]
                   Report layout, target-size, testID, and contrast issues.
 
@@ -329,11 +410,17 @@ struct LoupeCLI {
               wait-for-visible (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--host <url>]
                   Poll /snapshot until a visible node matches.
 
+              wait-for-gone (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--host <url>]
+                  Poll until a visible node no longer matches.
+
+              wait-for-value (--test-id <id> | --ref <ref>) --key <path> --equals <value> [--host <url>]
+                  Poll until an inspected node property matches.
+
               launch --bundle-id <id> [--device booted] [--inject] [--dylib <path>] [--env KEY=VALUE]
                   Launch an iOS Simulator app through simctl. --inject auto-resolves LoupeInjector.
 
-              tap (--test-id <id> | --ref <ref> | --text <text> | --x <n> --y <n>) --udid <sim>
-                  Resolve a Loupe target and tap it through AXe. Add --trace-dir <path> to save before/after artifacts.
+              tap (--test-id <id> | --ref <ref> | --x <n> --y <n>) --udid <sim> [--expect-visible <testID>]
+                  Resolve a stable Loupe target or coordinate and tap it through AXe. Text selectors are not supported.
 
               swipe|drag --from x,y --to x,y --udid <sim>
                   Dispatch a one-finger gesture through AXe. Add --trace-dir <path> to save before/after artifacts.
@@ -344,16 +431,19 @@ struct LoupeCLI {
               type <text> --udid <sim>
                   Type text into the focused field through AXe.
 
-              screenshot --udid <sim> --output <path>
+              screenshot --udid <sim> --output <path> [--timeout <seconds>]
                   Capture a simulator screenshot through simctl.
 
-              runtime [--host <url>] [--udid <sim>] [--output <path>]
+              runtime [--host <url>] [--udid <sim>] [--output <path>] [--timeout <seconds>]
                   Fetch injected SDK runtime identity, recording state, and logs.
 
               record-start|record-stop|recording [--host <url>] [--udid <sim>] [--output <path>]
                   Control and fetch the injected SDK touch recorder.
 
-              replay <recording.json> --udid <sim>
+              record start <alias> | record stop | record list | record show <alias>
+                  Alias-based recorder commands. Stopped recordings are saved under ~/.loupe/recordings.
+
+              replay <recording.json|alias> --udid <sim>
                   Replay a Loupe recording as AXe actions. Pinch events are not supported yet.
             """
         )
@@ -366,23 +456,134 @@ struct LoupeCLI {
         allowsAlias: Bool = false
     ) async throws {
         let options = try RuntimeFetchOptions(arguments, usage: usage, allowsAlias: allowsAlias)
+        let data = try await runtimeData(path: path, options: options)
+        try write(data: data, outputURL: options.outputURL)
+    }
+
+    private static func runtimeData(path: String, options: RuntimeFetchOptions) async throws -> Data {
+        let host = try await resolvedRuntimeHost(
+            requestedHost: options.host,
+            hostWasExplicit: options.hostWasExplicit,
+            udid: options.udid
+        )
         if let udid = options.udid {
-            try await validateRuntimeIdentity(host: options.host, expectedUDID: udid)
+            try await validateRuntimeIdentity(host: host, expectedUDID: udid, timeout: options.timeout)
         }
-        var url = options.host.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        var url = host.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         if let alias = options.alias {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
             components?.queryItems = [URLQueryItem(name: "alias", value: alias)]
             url = components?.url ?? url
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await httpData(from: url, timeout: options.timeout, label: "runtime fetch")
         guard let httpResponse = response as? HTTPURLResponse else {
             throw CLIError("runtime fetch expected an HTTP response")
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw CLIError("runtime fetch failed with HTTP \(httpResponse.statusCode)")
         }
-        try write(data: data, outputURL: options.outputURL)
+        return data
+    }
+
+    private static func runtimes(_ arguments: [String]) async throws {
+        let options = try RuntimeListOptions(arguments)
+        let records = try loadRuntimeHostRecords()
+        var rows: [RuntimeListRow] = []
+
+        for record in records {
+            var live = false
+            var simulator = ""
+            var pid = ""
+            var startedAt = ""
+            var bundleID = record.bundleID
+            if let host = URL(string: record.host),
+               let state = try? await fetchRuntimeState(host: host, timeout: options.timeout) {
+                live = true
+                simulator = state.identity.simulatorName ?? ""
+                pid = String(state.identity.processIdentifier)
+                startedAt = isoString(state.identity.startedAt)
+                bundleID = state.identity.bundleIdentifier ?? bundleID
+            }
+            rows.append(
+                RuntimeListRow(
+                    udid: record.udid,
+                    simulator: simulator,
+                    bundleID: bundleID,
+                    host: record.host,
+                    pid: pid,
+                    live: live,
+                    startedAt: startedAt,
+                    updatedAt: isoString(record.updatedAt)
+                )
+            )
+        }
+
+        if options.json {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            FileHandle.standardOutput.write(try encoder.encode(rows))
+            FileHandle.standardOutput.write(Data("\n".utf8))
+            return
+        }
+
+        print("udid\tlive\tbundle\t host\tpid\tsimulator\tstartedAt\tupdatedAt")
+        for row in rows {
+            print("\(row.udid)\t\(row.live ? "yes" : "no")\t\(row.bundleID)\t\(row.host)\t\(row.pid)\t\(row.simulator)\t\(row.startedAt)\t\(row.updatedAt)")
+        }
+    }
+
+    private static func record(_ arguments: [String]) async throws {
+        guard let subcommand = arguments.first else {
+            throw CLIError("Usage: loupe record start <alias> | stop | list | show <alias>")
+        }
+        let rest = Array(arguments.dropFirst())
+
+        switch subcommand {
+        case "start":
+            let options = try RuntimeFetchOptions(
+                rest,
+                usage: "loupe record start <alias> [--host <url>] [--udid <sim>] [--output <path>]",
+                allowsAlias: true
+            )
+            guard options.alias != nil else {
+                throw CLIError("record start requires an alias")
+            }
+            let data = try await runtimeData(path: "/recording/start", options: options)
+            try write(data: data, outputURL: options.outputURL)
+        case "stop":
+            let options = try RuntimeFetchOptions(
+                rest,
+                usage: "loupe record stop [--host <url>] [--udid <sim>] [--output <path>]"
+            )
+            let data = try await runtimeData(path: "/recording/stop", options: options)
+            if let outputURL = options.outputURL {
+                try data.write(to: outputURL)
+                print(outputURL.path)
+                return
+            }
+            let recording = try decodeRecording(data)
+            let url = try storeRecording(recording)
+            print(url.path)
+        case "show":
+            guard let alias = rest.first, !alias.hasPrefix("--") else {
+                throw CLIError("record show requires an alias")
+            }
+            let data = try Data(contentsOf: recordingURL(alias: alias))
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data("\n".utf8))
+        case "list", "recordings":
+            let rows = try loadRecordingSummaries()
+            if rows.isEmpty {
+                print("No recordings saved.")
+            } else {
+                print("alias\tevents\tstartedAt\tendedAt\tbundle")
+                for row in rows {
+                    print("\(row.alias)\t\(row.eventCount)\t\(row.startedAt)\t\(row.endedAt)\t\(row.bundleID)")
+                }
+            }
+        default:
+            throw CLIError("Unknown record command: \(subcommand)")
+        }
     }
 
     private static func screenshot(_ arguments: [String]) throws {
@@ -390,72 +591,187 @@ struct LoupeCLI {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl", "io", options.udid, "screenshot", options.outputPath]
-        try run(process, label: "simctl screenshot")
+        try run(process, label: "simctl screenshot", timeout: options.timeout)
     }
 
     private static func action(command: String, arguments: [String]) async throws {
-        let options = try ActionOptions(command: command, arguments: arguments)
-        if let traceDirectory = options.traceDirectory {
-            try prepareTraceDirectory(traceDirectory)
-            try await writePreActionTrace(command: command, options: options, traceDirectory: traceDirectory)
-        }
-        let target = try await resolveActionTarget(options)
-        if let traceDirectory = options.traceDirectory {
-            try writeActionRecord(
+        var options = try ActionOptions(command: command, arguments: arguments)
+        var target: ActionTarget?
+        do {
+            if command == "tap", let point = options.point, options.traceDirectory == nil, !options.hostWasExplicit, options.expectVisibleTestID == nil {
+                let coordinateTarget = ActionTarget(point: point, screen: options.screen, screenScale: 1, source: .coordinates)
+                target = coordinateTarget
+                try dispatchAction(command: command, options: options, target: coordinateTarget)
+                return
+            }
+
+            options.host = try await resolvedRuntimeHost(
+                requestedHost: options.host,
+                hostWasExplicit: options.hostWasExplicit,
+                udid: options.udid
+            )
+            try await validateRuntimeIdentity(host: options.host, expectedUDID: options.udid, timeout: options.timeout)
+            if let traceDirectory = options.traceDirectory {
+                try prepareTraceDirectory(traceDirectory)
+                try await writePreActionTrace(command: command, options: options, traceDirectory: traceDirectory)
+            }
+            let resolvedTarget = try await resolveActionTarget(options)
+            target = resolvedTarget
+            if let traceDirectory = options.traceDirectory {
+                try writeActionRecord(
+                    command: command,
+                    options: options,
+                    target: resolvedTarget,
+                    phase: "target",
+                    to: traceDirectory.appendingPathComponent("action-target.json")
+                )
+            }
+            try dispatchAction(command: command, options: options, target: resolvedTarget)
+            try await verifyRuntimeAlive(host: options.host, timeout: options.timeout)
+            if let expected = options.expectVisibleTestID {
+                try await expectVisible(expected, host: options.host, timeout: options.timeout)
+            }
+            if let traceDirectory = options.traceDirectory {
+                try await Task.sleep(nanoseconds: 250_000_000)
+                try await writePostActionTrace(command: command, options: options, target: resolvedTarget, traceDirectory: traceDirectory)
+            }
+        } catch {
+            let traceDirectory = options.traceDirectory ?? automaticTraceDirectory(command: command)
+            try? prepareTraceDirectory(traceDirectory)
+            try? await writeFailureTrace(
                 command: command,
                 options: options,
                 target: target,
-                phase: "target",
-                to: traceDirectory.appendingPathComponent("action-target.json")
+                error: error,
+                traceDirectory: traceDirectory
             )
-        }
-        try dispatchAction(command: command, options: options, target: target)
-        if let traceDirectory = options.traceDirectory {
-            try await Task.sleep(nanoseconds: 250_000_000)
-            try await writePostActionTrace(command: command, options: options, target: target, traceDirectory: traceDirectory)
+            if options.traceDirectory == nil {
+                FileHandle.standardError.write(Data("trace: \(traceDirectory.path)\n".utf8))
+            }
+            throw error
         }
     }
 
-    private static func waitForVisible(_ arguments: [String]) async throws {
-        let options = try WaitForVisibleOptions(arguments)
+    private static func waitFor(_ arguments: [String], mode: WaitMode) async throws {
+        let options = try WaitForOptions(arguments, mode: mode)
         let deadline = Date().addingTimeInterval(options.timeout)
 
         while true {
-            let snapshot = try await fetchSnapshot(host: options.host)
-            let accessibilityTree = try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot)
-            if let result = LoupeAccessibilityTreeQuery.first(
+            let snapshot = try await fetchSnapshot(host: options.host, timeout: min(3, options.timeout))
+            let accessibilityTree = try await fetchAccessibilityTree(
+                host: options.host,
+                fallbackSnapshot: snapshot,
+                timeout: min(3, options.timeout)
+            )
+            let accessibilityResult = LoupeAccessibilityTreeQuery.first(
                 options.selector,
                 in: accessibilityTree,
                 options: LoupeQueryOptions(includeHidden: false, includeDisabled: true, maxResults: 1)
-            ) {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                FileHandle.standardOutput.write(try encoder.encode(result))
-                FileHandle.standardOutput.write(Data("\n".utf8))
-                return
-            }
-            if let result = LoupeSnapshotQuery.first(
+            )
+            let viewResult = LoupeSnapshotQuery.first(
                 options.selector,
                 in: snapshot,
                 options: LoupeQueryOptions(includeHidden: false, includeDisabled: true, maxResults: 1)
-            ) {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                FileHandle.standardOutput.write(try encoder.encode(result))
-                FileHandle.standardOutput.write(Data("\n".utf8))
-                return
+            )
+
+            switch mode {
+            case .visible:
+                if let result = accessibilityResult {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                    FileHandle.standardOutput.write(try encoder.encode(result))
+                    FileHandle.standardOutput.write(Data("\n".utf8))
+                    return
+                }
+                if let result = viewResult {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                    FileHandle.standardOutput.write(try encoder.encode(result))
+                    FileHandle.standardOutput.write(Data("\n".utf8))
+                    return
+                }
+            case .gone:
+                if accessibilityResult == nil, viewResult == nil {
+                    print(#"{"status":"gone"}"#)
+                    return
+                }
+            case .value:
+                guard let keyPath = options.keyPath, let expectedValue = options.expectedValue else {
+                    throw CLIError("wait-for-value requires --key <path> and --equals <value>")
+                }
+                if let node = firstMatchingNode(options.selector, in: snapshot),
+                   let value = jsonValue(in: node, keyPath: keyPath),
+                   valueMatches(value, expected: expectedValue) {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                    FileHandle.standardOutput.write(try encoder.encode(node))
+                    FileHandle.standardOutput.write(Data("\n".utf8))
+                    return
+                }
             }
 
             guard Date() < deadline else {
-                throw CLIError("Timed out waiting for visible Loupe node")
+                switch mode {
+                case .visible:
+                    throw CLIError("Timed out waiting for visible Loupe node")
+                case .gone:
+                    throw CLIError("Timed out waiting for Loupe node to disappear")
+                case .value:
+                    throw CLIError("Timed out waiting for Loupe node value")
+                }
             }
 
             try await Task.sleep(nanoseconds: UInt64(options.interval * 1_000_000_000))
         }
     }
 
+    private static func expectVisible(_ testID: String, host: URL, timeout: TimeInterval) async throws {
+        let options = WaitForOptions(
+            host: host,
+            selector: .testID(testID),
+            timeout: timeout,
+            interval: 0.25,
+            keyPath: nil,
+            expectedValue: nil
+        )
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while true {
+            let snapshot = try await fetchSnapshot(host: options.host, timeout: min(3, options.timeout))
+            let accessibilityTree = try await fetchAccessibilityTree(
+                host: options.host,
+                fallbackSnapshot: snapshot,
+                timeout: min(3, options.timeout)
+            )
+            if LoupeAccessibilityTreeQuery.first(
+                options.selector,
+                in: accessibilityTree,
+                options: LoupeQueryOptions(includeHidden: false, includeDisabled: true, maxResults: 1)
+            ) != nil {
+                return
+            }
+            if LoupeSnapshotQuery.first(
+                options.selector,
+                in: snapshot,
+                options: LoupeQueryOptions(includeHidden: false, includeDisabled: true, maxResults: 1)
+            ) != nil {
+                return
+            }
+            guard Date() < deadline else {
+                throw CLIError("Timed out waiting for expected visible Loupe node: \(testID)")
+            }
+            try await Task.sleep(nanoseconds: UInt64(options.interval * 1_000_000_000))
+        }
+    }
+
     private static func replay(_ arguments: [String]) async throws {
-        let options = try ReplayOptions(arguments)
+        var options = try ReplayOptions(arguments)
+        options.host = try await resolvedRuntimeHost(
+            requestedHost: options.host,
+            hostWasExplicit: options.hostWasExplicit,
+            udid: options.udid
+        )
+        try await validateRuntimeIdentity(host: options.host, expectedUDID: options.udid, timeout: options.actionOptions.timeout)
         let data = try Data(contentsOf: options.recordingURL)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -489,21 +805,44 @@ struct LoupeCLI {
             throw CLIError("\(options.command) requires a selector or coordinates")
         }
 
-        let snapshot = try await fetchSnapshot(host: options.host)
-        let accessibilityTree = try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot)
-        if let result = LoupeAccessibilityTreeQuery.first(selector, in: accessibilityTree) {
-            if let point = result.activationPoint ?? center(of: result.frame) {
-                return ActionTarget(
-                    point: point,
-                    screen: snapshot.screen.size,
-                    screenScale: snapshot.screen.scale,
-                    source: .accessibility(ref: result.ref, sourceRef: result.sourceRef),
-                    match: .accessibility(result)
-                )
-            }
+        let snapshot = try await fetchSnapshot(host: options.host, timeout: options.timeout)
+        let accessibilityTree = try await fetchAccessibilityTree(
+            host: options.host,
+            fallbackSnapshot: snapshot,
+            timeout: options.timeout
+        )
+        let accessibilityMatches = uniqueActionMatches(
+            LoupeAccessibilityTreeQuery.find(
+                selector,
+                in: accessibilityTree,
+                options: LoupeQueryOptions(includeHidden: false, includeDisabled: false, maxResults: 8)
+            )
+        )
+        if accessibilityMatches.count > 1 {
+            throw CLIError("Selector matched multiple accessibility nodes: \(matchSummary(accessibilityMatches))")
+        }
+        if let result = accessibilityMatches.first,
+           let point = result.activationPoint ?? center(of: result.frame) {
+            return ActionTarget(
+                point: point,
+                screen: snapshot.screen.size,
+                screenScale: snapshot.screen.scale,
+                source: .accessibility(ref: result.ref, sourceRef: result.sourceRef),
+                match: .accessibility(result)
+            )
         }
 
-        guard let result = LoupeSnapshotQuery.first(selector, in: snapshot) else {
+        let viewMatches = uniqueActionMatches(
+            LoupeSnapshotQuery.find(
+                selector,
+                in: snapshot,
+                options: LoupeQueryOptions(includeHidden: false, includeDisabled: false, maxResults: 8)
+            )
+        )
+        if viewMatches.count > 1 {
+            throw CLIError("Selector matched multiple view nodes: \(matchSummary(viewMatches))")
+        }
+        guard let result = viewMatches.first else {
             throw CLIError("No Loupe accessibility or view node matched selector")
         }
         guard let point = center(of: result.frame) else {
@@ -526,9 +865,75 @@ struct LoupeCLI {
         return LoupePoint(x: frame.x + frame.width / 2, y: frame.y + frame.height / 2)
     }
 
-    private static func fetchSnapshot(host: URL) async throws -> LoupeSnapshot {
+    private static func uniqueActionMatches(
+        _ matches: [LoupeAccessibilityQueryResult]
+    ) -> [LoupeAccessibilityQueryResult] {
+        var seen = Set<String>()
+        return matches.filter { match in
+            seen.insert(actionEquivalenceKey(match)).inserted
+        }
+    }
+
+    private static func uniqueActionMatches(_ matches: [LoupeQueryResult]) -> [LoupeQueryResult] {
+        var seen = Set<String>()
+        return matches.filter { match in
+            seen.insert(actionEquivalenceKey(match)).inserted
+        }
+    }
+
+    private static func actionEquivalenceKey(_ match: LoupeAccessibilityQueryResult) -> String {
+        [
+            match.role ?? "",
+            match.testID ?? "",
+            match.text ?? "",
+            geometryKey(frame: match.frame, activationPoint: match.activationPoint),
+        ].joined(separator: "|")
+    }
+
+    private static func actionEquivalenceKey(_ match: LoupeQueryResult) -> String {
+        [
+            match.role ?? "",
+            match.testID ?? "",
+            match.text ?? "",
+            geometryKey(frame: match.frame, activationPoint: nil),
+        ].joined(separator: "|")
+    }
+
+    private static func geometryKey(frame: LoupeRect?, activationPoint: LoupePoint?) -> String {
+        let frameKey: String
+        if let frame {
+            frameKey = [frame.x, frame.y, frame.width, frame.height].map(roundedKey).joined(separator: ",")
+        } else {
+            frameKey = "nil"
+        }
+        let pointKey: String
+        if let activationPoint {
+            pointKey = [activationPoint.x, activationPoint.y].map(roundedKey).joined(separator: ",")
+        } else {
+            pointKey = "nil"
+        }
+        return "\(frameKey)|\(pointKey)"
+    }
+
+    private static func roundedKey(_ value: Double) -> String {
+        String(format: "%.3f", value)
+    }
+
+    private static func matchSummary(_ matches: [LoupeAccessibilityQueryResult]) -> String {
+        matches
+            .map { "\($0.ref)\($0.testID.map { "#\($0)" } ?? "")\($0.text.map { " \"\($0)\"" } ?? "")" }
+            .joined(separator: ", ")
+    }
+
+    private static func matchSummary(_ matches: [LoupeQueryResult]) -> String {
+        matches
+            .map { "\($0.ref)\($0.testID.map { "#\($0)" } ?? "")\($0.text.map { " \"\($0)\"" } ?? "")" }
+            .joined(separator: ", ")
+    }
+
+    private static func fetchSnapshot(host: URL, timeout: TimeInterval = 5) async throws -> LoupeSnapshot {
         let url = host.appendingPathComponent("snapshot")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await httpData(from: url, timeout: timeout, label: "snapshot fetch")
         guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
             throw CLIError("snapshot fetch failed")
         }
@@ -539,11 +944,12 @@ struct LoupeCLI {
 
     private static func fetchAccessibilityTree(
         host: URL,
-        fallbackSnapshot: LoupeSnapshot
+        fallbackSnapshot: LoupeSnapshot,
+        timeout: TimeInterval = 5
     ) async throws -> LoupeAccessibilityTree {
         let url = host.appendingPathComponent("accessibility")
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await httpData(from: url, timeout: timeout, label: "accessibility fetch")
             guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
                 return LoupeAccessibilityTree.build(from: fallbackSnapshot)
             }
@@ -553,9 +959,9 @@ struct LoupeCLI {
         }
     }
 
-    private static func fetchRuntimeState(host: URL) async throws -> LoupeRuntimeState {
+    private static func fetchRuntimeState(host: URL, timeout: TimeInterval = 5) async throws -> LoupeRuntimeState {
         let url = host.appendingPathComponent("runtime")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await httpData(from: url, timeout: timeout, label: "runtime fetch")
         guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
             throw CLIError("runtime fetch failed")
         }
@@ -564,9 +970,9 @@ struct LoupeCLI {
         return try decoder.decode(LoupeRuntimeState.self, from: data)
     }
 
-    private static func validateRuntimeIdentity(host: URL, expectedUDID: String) async throws {
+    private static func validateRuntimeIdentity(host: URL, expectedUDID: String, timeout: TimeInterval = 5) async throws {
         let expected = try resolvedBackendUDID(expectedUDID)
-        let state = try await fetchRuntimeState(host: host)
+        let state = try await fetchRuntimeState(host: host, timeout: timeout)
         guard let actual = state.identity.simulatorUDID, !actual.isEmpty else {
             throw CLIError("Loupe runtime did not report SIMULATOR_UDID; cannot validate --udid \(expected)")
         }
@@ -578,6 +984,145 @@ struct LoupeCLI {
         }
     }
 
+    private static func verifyRuntimeAlive(host: URL, timeout: TimeInterval) async throws {
+        _ = try await fetchRuntimeState(host: host, timeout: timeout)
+    }
+
+    private static func waitForRuntime(host: URL, expectedUDID: String, timeout: TimeInterval) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastError: Error?
+
+        repeat {
+            do {
+                try await validateRuntimeIdentity(host: host, expectedUDID: expectedUDID, timeout: min(1, timeout))
+                return
+            } catch {
+                lastError = error
+                try await Task.sleep(nanoseconds: 200_000_000)
+            }
+        } while Date() < deadline
+
+        throw CLIError("Timed out waiting for Loupe runtime at \(host.absoluteString): \(lastError.map(String.init(describing:)) ?? "no response")")
+    }
+
+    private static func resolvedRuntimeHost(
+        requestedHost: URL,
+        hostWasExplicit: Bool,
+        udid: String?
+    ) async throws -> URL {
+        guard !hostWasExplicit, let udid else {
+            return requestedHost
+        }
+
+        let resolvedUDID = try resolvedBackendUDID(udid)
+        if let record = try loadRuntimeHost(udid: resolvedUDID),
+           let url = URL(string: record.host),
+           !record.host.isEmpty {
+            return url
+        }
+
+        return requestedHost
+    }
+
+    private static func resolvedLoupePort(for udid: String, environment: [String: String]) throws -> UInt16 {
+        if let rawPort = environment["LOUPE_PORT"] {
+            guard let port = UInt16(rawPort), port > 0 else {
+                throw CLIError("LOUPE_PORT must be a valid TCP port")
+            }
+            return port
+        }
+
+        return stablePort(for: udid)
+    }
+
+    private static func stablePort(for udid: String) -> UInt16 {
+        var hash: UInt32 = 2_166_136_261
+        for byte in udid.utf8 {
+            hash ^= UInt32(byte)
+            hash &*= 16_777_619
+        }
+        return UInt16(8_765 + (hash % 1_000))
+    }
+
+    private static func validateLaunchPort(host: URL, expectedUDID: String, expectedBundleID: String) throws {
+        var request = URLRequest(url: host.appendingPathComponent("runtime"))
+        request.timeoutInterval = 0.75
+        let semaphore = DispatchSemaphore(value: 0)
+        let probe = LaunchPortProbe()
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            defer { semaphore.signal() }
+            if let error {
+                probe.result = .failure(error)
+                return
+            }
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let data else {
+                probe.result = .failure(CLIError("port is occupied by a non-Loupe HTTP service"))
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            probe.result = Result { try decoder.decode(LoupeRuntimeState.self, from: data) }
+        }.resume()
+
+        guard semaphore.wait(timeout: .now() + 1) == .success, let result = probe.result else {
+            return
+        }
+
+        switch result {
+        case let .success(state):
+            guard state.identity.simulatorUDID == expectedUDID else {
+                let actual = state.identity.simulatorUDID ?? "unknown"
+                throw CLIError("Loupe port collision at \(host.absoluteString): running simulator \(actual), requested \(expectedUDID)")
+            }
+            guard state.identity.bundleIdentifier == expectedBundleID else {
+                let actual = state.identity.bundleIdentifier ?? "unknown"
+                throw CLIError("Loupe port collision at \(host.absoluteString): running bundle \(actual), requested \(expectedBundleID)")
+            }
+        case let .failure(error as CLIError):
+            throw error
+        case .failure:
+            return
+        }
+    }
+
+    private static func terminateAppIfRunning(device: String, bundleID: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "terminate", device, bundleID]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    private static func runtimeHostDirectory() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".loupe", isDirectory: true)
+            .appendingPathComponent("runtimes", isDirectory: true)
+    }
+
+    private static func runtimeHostRecordURL(udid: String) -> URL {
+        runtimeHostDirectory().appendingPathComponent("\(udid).json")
+    }
+
+    private static func storeRuntimeHost(udid: String, bundleID: String, host: URL) throws {
+        let directory = runtimeHostDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let record = LoupeRuntimeHostRecord(udid: udid, bundleID: bundleID, host: host.absoluteString, updatedAt: Date())
+        try writeJSON(record, to: runtimeHostRecordURL(udid: udid))
+    }
+
+    private static func loadRuntimeHost(udid: String) throws -> LoupeRuntimeHostRecord? {
+        let url = runtimeHostRecordURL(udid: udid)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(LoupeRuntimeHostRecord.self, from: data)
+    }
+
     private static func prepareTraceDirectory(_ url: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
@@ -587,10 +1132,10 @@ struct LoupeCLI {
         options: ActionOptions,
         traceDirectory: URL
     ) async throws {
-        let snapshot = try await fetchSnapshot(host: options.host)
+        let snapshot = try await fetchSnapshot(host: options.host, timeout: options.timeout)
         try writeJSON(snapshot, to: traceDirectory.appendingPathComponent("before-snapshot.json"))
         try writeJSON(
-            try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot),
+            try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot, timeout: options.timeout),
             to: traceDirectory.appendingPathComponent("before-accessibility.json")
         )
         try await writeRuntimeTracePayload(
@@ -619,10 +1164,10 @@ struct LoupeCLI {
         target: ActionTarget,
         traceDirectory: URL
     ) async throws {
-        let snapshot = try await fetchSnapshot(host: options.host)
+        let snapshot = try await fetchSnapshot(host: options.host, timeout: options.timeout)
         try writeJSON(snapshot, to: traceDirectory.appendingPathComponent("after-snapshot.json"))
         try writeJSON(
-            try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot),
+            try await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot, timeout: options.timeout),
             to: traceDirectory.appendingPathComponent("after-accessibility.json")
         )
         try await writeRuntimeTracePayload(
@@ -643,6 +1188,54 @@ struct LoupeCLI {
             udid: udid,
             outputURL: traceDirectory.appendingPathComponent("after.png")
         )
+    }
+
+    private static func writeFailureTrace(
+        command: String,
+        options: ActionOptions,
+        target: ActionTarget?,
+        error: Error,
+        traceDirectory: URL
+    ) async throws {
+        try writeJSON(
+            LoupeCLIActionErrorTrace(message: String(describing: error), recordedAt: Date()),
+            to: traceDirectory.appendingPathComponent("error.json")
+        )
+        try writeActionRecord(
+            command: command,
+            options: options,
+            target: target,
+            phase: "failure",
+            to: traceDirectory.appendingPathComponent("action-failure.json")
+        )
+        if let snapshot = try? await fetchSnapshot(host: options.host, timeout: min(3, options.timeout)) {
+            try? writeJSON(snapshot, to: traceDirectory.appendingPathComponent("failure-snapshot.json"))
+            if let tree = try? await fetchAccessibilityTree(host: options.host, fallbackSnapshot: snapshot, timeout: min(3, options.timeout)) {
+                try? writeJSON(tree, to: traceDirectory.appendingPathComponent("failure-accessibility.json"))
+            }
+        }
+        try? await writeRuntimeTracePayload(
+            host: options.host,
+            path: "logs",
+            to: traceDirectory.appendingPathComponent("failure-logs.json")
+        )
+        if let udid = try? resolvedBackendUDID(options.udid) {
+            try? captureSimulatorScreenshot(
+                udid: udid,
+                outputURL: traceDirectory.appendingPathComponent("failure.png")
+            )
+        }
+    }
+
+    private static func automaticTraceDirectory(command: String) -> URL {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("loupe-traces", isDirectory: true)
+            .appendingPathComponent("\(stamp)-\(command)", isDirectory: true)
     }
 
     private static func writeActionRecord(
@@ -678,12 +1271,12 @@ struct LoupeCLI {
         process.arguments = ["simctl", "io", udid, "screenshot", "--type=png", outputURL.path]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-        try run(process, label: "simctl screenshot")
+        try run(process, label: "simctl screenshot", timeout: 10)
     }
 
     private static func writeRuntimeTracePayload(host: URL, path: String, to url: URL) async throws {
         let endpoint = host.appendingPathComponent(path)
-        let (data, response) = try await URLSession.shared.data(from: endpoint)
+        let (data, response) = try await httpData(from: endpoint, timeout: 5, label: "runtime trace fetch")
         guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
             throw CLIError("runtime trace fetch failed for /\(path)")
         }
@@ -721,7 +1314,7 @@ struct LoupeCLI {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: backend.path)
         process.arguments = try axeArguments(command: command, options: options, target: target)
-        try run(process, label: "\(backend.name) \(command)")
+        try run(process, label: "\(backend.name) \(command)", timeout: options.timeout)
     }
 
     private static func axeArguments(
@@ -730,13 +1323,13 @@ struct LoupeCLI {
         target: ActionTarget
     ) throws -> [String] {
         let udid = try resolvedBackendUDID(options.udid)
-        let mappedPoint = try mapToDisplayPoint(target.point, target: target, udid: udid)
+        let mappedPoint = mapToDisplayPoint(target.point)
         switch command {
         case "tap":
             return ["tap", "-x", format(mappedPoint.x), "-y", format(mappedPoint.y), "--udid", udid]
         case "swipe", "drag":
             let end = try options.requireEndPoint(command: command)
-            let mappedEnd = try mapToDisplayPoint(end, target: target, udid: udid)
+            let mappedEnd = mapToDisplayPoint(end)
             var arguments = [
                 "swipe",
                 "--start-x", format(mappedPoint.x),
@@ -758,24 +1351,8 @@ struct LoupeCLI {
         }
     }
 
-    private static func mapToDisplayPoint(
-        _ point: LoupePoint,
-        target: ActionTarget,
-        udid: String
-    ) throws -> LoupePoint {
-        guard target.screenScale > 1, target.screen.width > 0, target.screen.height > 0 else {
-            return point
-        }
-
-        let display = try simulatorDisplaySize(udid: udid, scale: target.screenScale)
-        guard display.width > target.screen.width || display.height > target.screen.height else {
-            return point
-        }
-
-        let scale = min(display.width / target.screen.width, display.height / target.screen.height)
-        let offsetX = (display.width - target.screen.width * scale) / 2
-        let offsetY = (display.height - target.screen.height * scale) / 2
-        return LoupePoint(x: point.x * scale + offsetX, y: point.y * scale + offsetY)
+    private static func mapToDisplayPoint(_ point: LoupePoint) -> LoupePoint {
+        point
     }
 
     private static func simulatorDisplaySize(udid: String, scale: Double) throws -> LoupeSize {
@@ -852,6 +1429,45 @@ struct LoupeCLI {
             throw CLIError("Booted simulator did not include a UDID")
         }
 
+        return udid
+    }
+
+    private static func resolveSimulatorUDID(_ requested: String) throws -> String {
+        if requested == "booted" {
+            return try resolvedBackendUDID(requested)
+        }
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "list", "devices", "--json"]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try run(process, label: "simctl list devices", timeout: 5)
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let devicesByRuntime = object["devices"] as? [String: [[String: Any]]]
+        else {
+            throw CLIError("Could not parse simulator device list")
+        }
+
+        let devices = devicesByRuntime.values.flatMap { $0 }
+        if devices.contains(where: { ($0["udid"] as? String) == requested }) {
+            return requested
+        }
+
+        let bootedMatches = devices.filter {
+            ($0["name"] as? String) == requested && ($0["state"] as? String) == "Booted"
+        }
+        guard bootedMatches.count == 1 else {
+            throw CLIError("Expected exactly one booted simulator named \(requested), found \(bootedMatches.count). Pass --device <UDID>.")
+        }
+
+        guard let udid = bootedMatches[0]["udid"] as? String else {
+            throw CLIError("Simulator \(requested) did not include a UDID")
+        }
         return udid
     }
 
@@ -987,9 +1603,30 @@ struct LoupeCLI {
         }
     }
 
-    private static func run(_ process: Process, label: String) throws {
+    private static func httpData(
+        from url: URL,
+        timeout: TimeInterval,
+        label: String
+    ) async throws -> (Data, URLResponse) {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        do {
+            return try await URLSession.shared.data(for: request)
+        } catch {
+            throw CLIError("\(label) timed out or failed for \(url.absoluteString): \(error.localizedDescription)")
+        }
+    }
+
+    private static func run(_ process: Process, label: String, timeout: TimeInterval = 10) throws {
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            semaphore.signal()
+        }
         try process.run()
-        process.waitUntilExit()
+        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw CLIError("\(label) timed out after \(format(timeout))s")
+        }
         guard process.terminationStatus == 0 else {
             throw CLIError("\(label) exited with status \(process.terminationStatus)")
         }
@@ -1002,6 +1639,258 @@ struct LoupeCLI {
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data("\n".utf8))
         }
+    }
+
+    private static func renderViewTree(
+        _ snapshot: LoupeSnapshot,
+        selector: LoupeSelector?,
+        depth: Int?,
+        includeHidden: Bool
+    ) -> String {
+        let roots: [String]
+        if let selector {
+            roots = LoupeSnapshotQuery.find(
+                selector,
+                in: snapshot,
+                options: LoupeQueryOptions(includeHidden: includeHidden, includeDisabled: true, maxResults: 20)
+            ).map(\.ref)
+        } else {
+            roots = snapshot.rootRefs
+        }
+
+        var lines: [String] = []
+        for ref in roots {
+            appendViewTree(ref: ref, snapshot: snapshot, depth: 0, maxDepth: depth, includeHidden: includeHidden, lines: &lines)
+        }
+        return lines.isEmpty ? "(empty)" : lines.joined(separator: "\n")
+    }
+
+    private static func appendViewTree(
+        ref: String,
+        snapshot: LoupeSnapshot,
+        depth: Int,
+        maxDepth: Int?,
+        includeHidden: Bool,
+        lines: inout [String]
+    ) {
+        guard let node = snapshot.nodes[ref] else {
+            return
+        }
+        if !includeHidden, !node.isVisible {
+            return
+        }
+        lines.append("\(String(repeating: "  ", count: depth))\(viewTreeLine(node))")
+        guard maxDepth.map({ depth < $0 }) ?? true else {
+            return
+        }
+        for child in node.children {
+            appendViewTree(ref: child, snapshot: snapshot, depth: depth + 1, maxDepth: maxDepth, includeHidden: includeHidden, lines: &lines)
+        }
+    }
+
+    private static func renderAccessibilityTree(
+        _ tree: LoupeAccessibilityTree,
+        selector: LoupeSelector?,
+        depth: Int?,
+        includeHidden: Bool
+    ) -> String {
+        let roots: [String]
+        if let selector {
+            roots = LoupeAccessibilityTreeQuery.find(
+                selector,
+                in: tree,
+                options: LoupeQueryOptions(includeHidden: includeHidden, includeDisabled: true, maxResults: 20)
+            ).map(\.ref)
+        } else {
+            roots = tree.rootRefs
+        }
+
+        var lines: [String] = []
+        for ref in roots {
+            appendAccessibilityTree(ref: ref, tree: tree, depth: 0, maxDepth: depth, includeHidden: includeHidden, lines: &lines)
+        }
+        return lines.isEmpty ? "(empty)" : lines.joined(separator: "\n")
+    }
+
+    private static func appendAccessibilityTree(
+        ref: String,
+        tree: LoupeAccessibilityTree,
+        depth: Int,
+        maxDepth: Int?,
+        includeHidden: Bool,
+        lines: inout [String]
+    ) {
+        guard let node = tree.nodes[ref] else {
+            return
+        }
+        if !includeHidden, !node.isVisible {
+            return
+        }
+        lines.append("\(String(repeating: "  ", count: depth))\(accessibilityTreeLine(node))")
+        guard maxDepth.map({ depth < $0 }) ?? true else {
+            return
+        }
+        for child in node.children {
+            appendAccessibilityTree(ref: child, tree: tree, depth: depth + 1, maxDepth: maxDepth, includeHidden: includeHidden, lines: &lines)
+        }
+    }
+
+    private static func viewTreeLine(_ node: LoupeNode) -> String {
+        [
+            node.ref,
+            node.uiKit?.className ?? node.typeName,
+            node.role.map { "role=\($0)" },
+            node.testID.map { "testID=\($0)" },
+            displayText(node).map { "text=\"\($0)\"" },
+            node.frame.map { "frame=\(rectSummary($0))" },
+            node.isVisible ? nil : "hidden",
+        ].compactMap(\.self).joined(separator: " ")
+    }
+
+    private static func accessibilityTreeLine(_ node: LoupeAccessibilityNode) -> String {
+        [
+            node.ref,
+            node.role ?? "accessibility",
+            "source=\(node.sourceRef)",
+            node.testID.map { "testID=\($0)" },
+            LoupeAccessibilityTreeQuery.displayText(for: node).map { "text=\"\($0)\"" },
+            node.frame.map { "frame=\(rectSummary($0))" },
+            node.isVisible ? nil : "hidden",
+        ].compactMap(\.self).joined(separator: " ")
+    }
+
+    private static func rectSummary(_ rect: LoupeRect) -> String {
+        "\(format(rect.x)),\(format(rect.y)),\(format(rect.width)),\(format(rect.height))"
+    }
+
+    private static func displayText(_ node: LoupeNode) -> String? {
+        [node.text, node.label, node.value, node.placeholder]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
+    private static func firstMatchingNode(_ selector: LoupeSelector, in snapshot: LoupeSnapshot) -> LoupeNode? {
+        LoupeSnapshotQuery.find(
+            selector,
+            in: snapshot,
+            options: LoupeQueryOptions(includeHidden: false, includeDisabled: true, maxResults: 1)
+        ).first.flatMap { snapshot.nodes[$0.ref] }
+    }
+
+    private static func jsonValue(in node: LoupeNode, keyPath: String) -> Any? {
+        let normalizedPath = keyPath
+            .replacingOccurrences(of: "uiKit.switch.", with: "uiKit.switchControl.")
+            .replacingOccurrences(of: "uikit.", with: "uiKit.")
+        guard let data = try? JSONEncoder().encode(node),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        var current: Any? = object
+        for key in normalizedPath.split(separator: ".").map(String.init) {
+            if let dictionary = current as? [String: Any] {
+                current = dictionary[key]
+            } else {
+                return nil
+            }
+        }
+        return current
+    }
+
+    private static func valueMatches(_ value: Any, expected: String) -> Bool {
+        if let bool = value as? Bool {
+            return bool == (expected as NSString).boolValue
+        }
+        if let number = value as? NSNumber {
+            if expected == "true" || expected == "false" {
+                return number.boolValue == (expected as NSString).boolValue
+            }
+            return format(number.doubleValue) == expected || String(number.intValue) == expected
+        }
+        if let string = value as? String {
+            return string == expected
+        }
+        return String(describing: value) == expected
+    }
+
+    private static func loadRuntimeHostRecords() throws -> [LoupeRuntimeHostRecord] {
+        let directory = runtimeHostDirectory()
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return urls
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? decoder.decode(LoupeRuntimeHostRecord.self, from: data)
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private static func recordingDirectory() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".loupe", isDirectory: true)
+            .appendingPathComponent("recordings", isDirectory: true)
+    }
+
+    private static func recordingURL(alias: String) -> URL {
+        recordingDirectory().appendingPathComponent("\(sanitizedAlias(alias)).json")
+    }
+
+    private static func storeRecording(_ recording: LoupeRecording) throws -> URL {
+        let alias = recording.alias ?? recording.id
+        let url = recordingURL(alias: alias)
+        try FileManager.default.createDirectory(at: recordingDirectory(), withIntermediateDirectories: true)
+        try writeJSON(recording, to: url)
+        return url
+    }
+
+    private static func decodeRecording(_ data: Data) throws -> LoupeRecording {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(LoupeRecording.self, from: data)
+    }
+
+    private static func loadRecordingSummaries() throws -> [RecordingSummary] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: recordingDirectory(),
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+        return urls
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url -> RecordingSummary? in
+                guard let data = try? Data(contentsOf: url),
+                      let recording = try? decodeRecording(data) else {
+                    return nil
+                }
+                return RecordingSummary(
+                    alias: recording.alias ?? url.deletingPathExtension().lastPathComponent,
+                    eventCount: recording.events.count,
+                    startedAt: isoString(recording.startedAt),
+                    endedAt: recording.endedAt.map(isoString) ?? "",
+                    bundleID: recording.appIdentity?.bundleIdentifier ?? ""
+                )
+            }
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    private static func sanitizedAlias(_ alias: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        return alias.unicodeScalars
+            .map { allowed.contains($0) ? Character($0) : "-" }
+            .map(String.init)
+            .joined()
+    }
+
+    private static func isoString(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 
     private static func format(_ value: Double) -> String {
@@ -1021,6 +1910,104 @@ struct LoupeCLI {
 private enum QueryTree: String {
     case view
     case accessibility
+}
+
+private struct TreeOptions {
+    var snapshotURL: URL?
+    var host: URL
+    var hostWasExplicit: Bool
+    var udid: String?
+    var selector: LoupeSelector?
+    var includeHidden: Bool
+    var depth: Int?
+    var timeout: TimeInterval
+    var tree: QueryTree
+
+    init(_ arguments: [String]) throws {
+        snapshotURL = nil
+        host = URL(string: "http://127.0.0.1:8765")!
+        hostWasExplicit = false
+        udid = nil
+        selector = nil
+        includeHidden = false
+        depth = nil
+        timeout = 5
+        tree = .view
+
+        var index = 0
+        if let first = arguments.first, !first.hasPrefix("--") {
+            snapshotURL = URL(fileURLWithPath: first)
+            index = 1
+        }
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--host":
+                let raw = try Self.value(after: "--host", in: arguments, index: &index)
+                guard let url = URL(string: raw) else {
+                    throw CLIError("Invalid --host URL: \(raw)")
+                }
+                host = url
+                hostWasExplicit = true
+            case "--udid", "--device":
+                udid = try Self.value(after: arguments[index], in: arguments, index: &index)
+            case "--view":
+                tree = .view
+            case "--accessibility":
+                tree = .accessibility
+            case "--tree":
+                let rawValue = try Self.value(after: "--tree", in: arguments, index: &index)
+                guard let value = QueryTree(rawValue: rawValue) else {
+                    throw CLIError("--tree expects view or accessibility")
+                }
+                tree = value
+            case "--test-id":
+                selector = .testID(try Self.value(after: "--test-id", in: arguments, index: &index))
+            case "--text":
+                selector = .text(try Self.value(after: "--text", in: arguments, index: &index), exact: false)
+            case "--exact-text":
+                selector = .text(try Self.value(after: "--exact-text", in: arguments, index: &index), exact: true)
+            case "--role":
+                selector = .role(try Self.value(after: "--role", in: arguments, index: &index))
+            case "--ref":
+                selector = .ref(try Self.value(after: "--ref", in: arguments, index: &index))
+            case "--depth":
+                let raw = try Self.value(after: "--depth", in: arguments, index: &index)
+                guard let value = Int(raw), value >= 0 else {
+                    throw CLIError("--depth expects a non-negative integer")
+                }
+                depth = value
+            case "--include-hidden":
+                includeHidden = true
+            case "--timeout":
+                timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
+            default:
+                throw CLIError("Unknown tree option: \(arguments[index])")
+            }
+            index += 1
+        }
+
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+    }
+
+    private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
+        let valueIndex = index + 1
+        guard valueIndex < arguments.count else {
+            throw CLIError("\(option) requires a value")
+        }
+        index = valueIndex
+        return arguments[valueIndex]
+    }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
+    }
 }
 
 private struct QueryOptions {
@@ -1297,6 +2284,7 @@ private struct AuditOptions {
 private struct FetchOptions {
     var url: URL
     var outputURL: URL?
+    var timeout: TimeInterval
 
     init(_ arguments: [String]) throws {
         guard let rawURL = arguments.first, !rawURL.hasPrefix("--") else {
@@ -1308,6 +2296,7 @@ private struct FetchOptions {
         }
 
         var outputURL: URL?
+        var timeout: TimeInterval = 5
         var index = 1
 
         while index < arguments.count {
@@ -1315,6 +2304,8 @@ private struct FetchOptions {
             case "--output":
                 let value = try Self.value(after: "--output", in: arguments, index: &index)
                 outputURL = URL(fileURLWithPath: value)
+            case "--timeout":
+                timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
             default:
                 throw CLIError("Unknown fetch option: \(arguments[index])")
             }
@@ -1324,6 +2315,10 @@ private struct FetchOptions {
 
         self.url = url
         self.outputURL = outputURL
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+        self.timeout = timeout
     }
 
     private static func value(
@@ -1338,6 +2333,14 @@ private struct FetchOptions {
         index = valueIndex
         return arguments[valueIndex]
     }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
+    }
 }
 
 private struct LaunchOptions {
@@ -1346,6 +2349,7 @@ private struct LaunchOptions {
     var dylibPath: String?
     var environment: [String: String]
     var shouldInject: Bool
+    var timeout: TimeInterval
 
     init(_ arguments: [String]) throws {
         var bundleID: String?
@@ -1353,6 +2357,7 @@ private struct LaunchOptions {
         var dylibPath: String?
         var environment: [String: String] = [:]
         var shouldInject = false
+        var timeout: TimeInterval = 15
         var index = 0
 
         while index < arguments.count {
@@ -1375,6 +2380,8 @@ private struct LaunchOptions {
                     throw CLIError("--env expects KEY=VALUE")
                 }
                 environment[pieces[0]] = pieces[1]
+            case "--timeout":
+                timeout = try Self.double(after: argument, in: arguments, index: &index)
             default:
                 throw CLIError("Unknown launch option: \(argument)")
             }
@@ -1391,6 +2398,10 @@ private struct LaunchOptions {
         self.dylibPath = dylibPath
         self.environment = environment
         self.shouldInject = shouldInject
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+        self.timeout = timeout
     }
 
     private static func value(
@@ -1405,11 +2416,20 @@ private struct LaunchOptions {
         index = valueIndex
         return arguments[valueIndex]
     }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
+    }
 }
 
 private protocol ActionDispatchOptions {
     var backend: String { get }
     var udid: String { get }
+    var timeout: TimeInterval { get }
     var endPoint: LoupePoint? { get }
     var duration: Double? { get }
     var text: String? { get }
@@ -1430,8 +2450,10 @@ private extension ActionDispatchOptions {
 private struct ActionOptions: ActionDispatchOptions {
     var command: String
     var host: URL
+    var hostWasExplicit: Bool
     var backend: String
     var udid: String
+    var timeout: TimeInterval
     var selector: LoupeSelector?
     var point: LoupePoint?
     var endPoint: LoupePoint?
@@ -1441,12 +2463,15 @@ private struct ActionOptions: ActionDispatchOptions {
     var startSpread: Double?
     var endSpread: Double?
     var traceDirectory: URL?
+    var expectVisibleTestID: String?
 
     init(command: String, arguments: [String]) throws {
         self.command = command
         host = URL(string: "http://127.0.0.1:8765")!
+        hostWasExplicit = false
         backend = "auto"
         udid = "booted"
+        timeout = 8
         screen = LoupeSize(width: 0, height: 0)
 
         var selector: LoupeSelector?
@@ -1457,6 +2482,7 @@ private struct ActionOptions: ActionDispatchOptions {
         var startSpread: Double?
         var endSpread: Double?
         var traceDirectory: URL?
+        var expectVisibleTestID: String?
         var screenWidth: Double?
         var screenHeight: Double?
         var hasX = false
@@ -1473,6 +2499,7 @@ private struct ActionOptions: ActionDispatchOptions {
             switch argument {
             case "--host":
                 host = try Self.url(after: argument, in: arguments, index: &index)
+                hostWasExplicit = true
             case "--backend":
                 backend = try Self.value(after: argument, in: arguments, index: &index)
             case "--udid", "--device":
@@ -1485,11 +2512,17 @@ private struct ActionOptions: ActionDispatchOptions {
                 let value = try Self.value(after: argument, in: arguments, index: &index)
                 if command == "type" {
                     text = value
+                } else if command == "tap" {
+                    throw CLIError("tap does not support text selectors; use --test-id, --ref, or coordinates")
                 } else {
-                    selector = .text(value, exact: false)
+                    throw CLIError("\(command) does not support --text selectors; use --test-id, --ref, or coordinates")
                 }
             case "--exact-text":
-                selector = .text(try Self.value(after: argument, in: arguments, index: &index), exact: true)
+                _ = try Self.value(after: argument, in: arguments, index: &index)
+                if command == "tap" {
+                    throw CLIError("tap does not support text selectors; use --test-id, --ref, or coordinates")
+                }
+                throw CLIError("\(command) does not support --exact-text selectors; use --test-id, --ref, or coordinates")
             case "--x":
                 let x = try Self.double(after: argument, in: arguments, index: &index)
                 let y = point?.y ?? 0
@@ -1510,12 +2543,16 @@ private struct ActionOptions: ActionDispatchOptions {
                 screenHeight = try Self.double(after: argument, in: arguments, index: &index)
             case "--duration":
                 duration = try Self.double(after: argument, in: arguments, index: &index)
+            case "--timeout":
+                timeout = try Self.double(after: argument, in: arguments, index: &index)
             case "--start-spread":
                 startSpread = try Self.double(after: argument, in: arguments, index: &index)
             case "--end-spread":
                 endSpread = try Self.double(after: argument, in: arguments, index: &index)
             case "--trace-dir":
                 traceDirectory = URL(fileURLWithPath: try Self.value(after: argument, in: arguments, index: &index))
+            case "--expect-visible":
+                expectVisibleTestID = try Self.value(after: argument, in: arguments, index: &index)
             default:
                 throw CLIError("Unknown \(command) option: \(argument)")
             }
@@ -1529,9 +2566,21 @@ private struct ActionOptions: ActionDispatchOptions {
         if command == "type", text == nil {
             throw CLIError("type requires text")
         }
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
 
         if hasX != hasY {
             throw CLIError("--x and --y must be provided together")
+        }
+
+        if command == "tap" {
+            if selector != nil, point != nil {
+                throw CLIError("tap accepts exactly one target: --test-id, --ref, or --x <n> --y <n>")
+            }
+            if selector == nil, point == nil {
+                throw CLIError("tap requires --test-id, --ref, or --x <n> --y <n>")
+            }
         }
 
         self.selector = selector
@@ -1542,6 +2591,7 @@ private struct ActionOptions: ActionDispatchOptions {
         self.startSpread = startSpread
         self.endSpread = endSpread
         self.traceDirectory = traceDirectory
+        self.expectVisibleTestID = expectVisibleTestID
     }
 
     private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
@@ -1582,6 +2632,7 @@ private struct ActionOptions: ActionDispatchOptions {
 private struct ReplayActionOptions: ActionDispatchOptions {
     var backend: String
     var udid: String
+    var timeout: TimeInterval
     var endPoint: LoupePoint?
     var duration: Double?
     var text: String?
@@ -1602,16 +2653,20 @@ private struct ReplayAction {
 private struct ReplayOptions {
     var recordingURL: URL
     var host: URL
+    var hostWasExplicit: Bool
+    var udid: String
     var screen: LoupeSize
     var actionOptions: ReplayActionOptions
 
     init(_ arguments: [String]) throws {
         guard let path = arguments.first, !path.hasPrefix("--") else {
-            throw CLIError("Usage: loupe replay <recording.json> --udid <sim> --width <points> --height <points> [--host <url>] [--backend auto|axe]")
+            throw CLIError("Usage: loupe replay <recording.json|alias> --udid <sim> --width <points> --height <points> [--host <url>] [--backend auto|axe]")
         }
 
-        recordingURL = URL(fileURLWithPath: path)
+        let fileURL = URL(fileURLWithPath: path)
+        recordingURL = FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : Self.recordingURL(alias: path)
         var host = URL(string: "http://127.0.0.1:8765")!
+        var hostWasExplicit = false
         var backend = "auto"
         var udid = "booted"
         var width: Double?
@@ -1622,6 +2677,7 @@ private struct ReplayOptions {
             switch arguments[index] {
             case "--host":
                 host = try Self.url(after: "--host", in: arguments, index: &index)
+                hostWasExplicit = true
             case "--backend":
                 backend = try Self.value(after: "--backend", in: arguments, index: &index)
             case "--udid", "--device":
@@ -1641,10 +2697,13 @@ private struct ReplayOptions {
         }
 
         self.host = host
+        self.hostWasExplicit = hostWasExplicit
+        self.udid = udid
         screen = LoupeSize(width: width, height: height)
         actionOptions = ReplayActionOptions(
             backend: backend,
             udid: udid,
+            timeout: 8,
             endPoint: nil,
             duration: nil,
             text: nil,
@@ -1678,19 +2737,38 @@ private struct ReplayOptions {
         }
         return url
     }
+
+    private static func recordingURL(alias: String) -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".loupe", isDirectory: true)
+            .appendingPathComponent("recordings", isDirectory: true)
+            .appendingPathComponent("\(sanitizedAlias(alias)).json")
+    }
+
+    private static func sanitizedAlias(_ alias: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        return alias.unicodeScalars
+            .map { allowed.contains($0) ? Character($0) : "-" }
+            .map(String.init)
+            .joined()
+    }
 }
 
 private struct RuntimeFetchOptions {
     var host: URL
+    var hostWasExplicit: Bool
     var udid: String?
     var alias: String?
     var outputURL: URL?
+    var timeout: TimeInterval
 
     init(_ arguments: [String], usage: String, allowsAlias: Bool = false) throws {
         host = URL(string: "http://127.0.0.1:8765")!
+        hostWasExplicit = false
         var udid: String?
         var alias: String?
         var outputURL: URL?
+        var timeout: TimeInterval = 5
         var index = 0
         while index < arguments.count {
             switch arguments[index] {
@@ -1702,6 +2780,7 @@ private struct RuntimeFetchOptions {
                     throw CLIError("Invalid --host URL: \(raw)")
                 }
                 host = url
+                hostWasExplicit = true
             case "--udid", "--device":
                 udid = try Self.value(after: arguments[index], in: arguments, index: &index)
             case "--alias", "--name":
@@ -1711,6 +2790,8 @@ private struct RuntimeFetchOptions {
                 alias = try Self.value(after: arguments[index], in: arguments, index: &index)
             case "--output":
                 outputURL = URL(fileURLWithPath: try Self.value(after: "--output", in: arguments, index: &index))
+            case "--timeout":
+                timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
             case "--help", "-h":
                 throw CLIError(usage)
             default:
@@ -1721,6 +2802,10 @@ private struct RuntimeFetchOptions {
         self.udid = udid
         self.alias = alias
         self.outputURL = outputURL
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+        self.timeout = timeout
     }
 
     private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
@@ -1731,18 +2816,94 @@ private struct RuntimeFetchOptions {
         index = valueIndex
         return arguments[valueIndex]
     }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
+    }
 }
 
-private struct WaitForVisibleOptions {
+private struct RuntimeListOptions {
+    var json: Bool
+    var timeout: TimeInterval
+
+    init(_ arguments: [String]) throws {
+        json = false
+        timeout = 1
+        var index = 0
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--json":
+                json = true
+            case "--timeout":
+                timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
+            default:
+                throw CLIError("Unknown runtimes option: \(arguments[index])")
+            }
+            index += 1
+        }
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+    }
+
+    private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
+        let valueIndex = index + 1
+        guard valueIndex < arguments.count else {
+            throw CLIError("\(option) requires a value")
+        }
+        index = valueIndex
+        return arguments[valueIndex]
+    }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
+    }
+}
+
+private enum WaitMode {
+    case visible
+    case gone
+    case value
+}
+
+private struct WaitForOptions {
     var host: URL
     var selector: LoupeSelector
     var timeout: TimeInterval
     var interval: TimeInterval
+    var keyPath: String?
+    var expectedValue: String?
 
-    init(_ arguments: [String]) throws {
+    init(
+        host: URL,
+        selector: LoupeSelector,
+        timeout: TimeInterval,
+        interval: TimeInterval,
+        keyPath: String?,
+        expectedValue: String?
+    ) {
+        self.host = host
+        self.selector = selector
+        self.timeout = timeout
+        self.interval = interval
+        self.keyPath = keyPath
+        self.expectedValue = expectedValue
+    }
+
+    init(_ arguments: [String], mode: WaitMode) throws {
         host = URL(string: "http://127.0.0.1:8765")!
         timeout = 10
         interval = 0.25
+        keyPath = nil
+        expectedValue = nil
 
         var selector: LoupeSelector?
         var index = 0
@@ -1769,14 +2930,21 @@ private struct WaitForVisibleOptions {
                 timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
             case "--interval":
                 interval = try Self.double(after: "--interval", in: arguments, index: &index)
+            case "--key":
+                keyPath = try Self.value(after: "--key", in: arguments, index: &index)
+            case "--equals":
+                expectedValue = try Self.value(after: "--equals", in: arguments, index: &index)
             default:
-                throw CLIError("Unknown wait-for-visible option: \(arguments[index])")
+                throw CLIError("Unknown wait-for option: \(arguments[index])")
             }
             index += 1
         }
 
         guard let selector else {
-            throw CLIError("wait-for-visible requires --test-id, --text, --role, or --ref")
+            throw CLIError("wait-for requires --test-id, --text, --role, or --ref")
+        }
+        if case .value = mode, (keyPath == nil || expectedValue == nil) {
+            throw CLIError("wait-for-value requires --key <path> and --equals <value>")
         }
         guard timeout > 0 else {
             throw CLIError("--timeout must be greater than 0")
@@ -1809,10 +2977,12 @@ private struct WaitForVisibleOptions {
 private struct ScreenshotOptions {
     var udid: String
     var outputPath: String
+    var timeout: TimeInterval
 
     init(_ arguments: [String]) throws {
         var udid = "booted"
         var outputPath: String?
+        var timeout: TimeInterval = 10
         var index = 0
         while index < arguments.count {
             switch arguments[index] {
@@ -1820,6 +2990,8 @@ private struct ScreenshotOptions {
                 udid = try Self.value(after: arguments[index], in: arguments, index: &index)
             case "--output":
                 outputPath = try Self.value(after: "--output", in: arguments, index: &index)
+            case "--timeout":
+                timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
             default:
                 throw CLIError("Unknown screenshot option: \(arguments[index])")
             }
@@ -1830,6 +3002,10 @@ private struct ScreenshotOptions {
         }
         self.udid = udid
         self.outputPath = outputPath
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+        self.timeout = timeout
     }
 
     private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
@@ -1839,6 +3015,14 @@ private struct ScreenshotOptions {
         }
         index = valueIndex
         return arguments[valueIndex]
+    }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
     }
 }
 
@@ -1863,6 +3047,41 @@ private struct LoupeCLIActionTrace: Codable {
     var resolvedSource: String?
     var resolvedTarget: ActionTargetTrace?
     var recordedAt: Date
+}
+
+private struct LoupeRuntimeHostRecord: Codable {
+    var udid: String
+    var bundleID: String
+    var host: String
+    var updatedAt: Date
+}
+
+private struct RuntimeListRow: Codable {
+    var udid: String
+    var simulator: String
+    var bundleID: String
+    var host: String
+    var pid: String
+    var live: Bool
+    var startedAt: String
+    var updatedAt: String
+}
+
+private struct RecordingSummary {
+    var alias: String
+    var eventCount: Int
+    var startedAt: String
+    var endedAt: String
+    var bundleID: String
+}
+
+private struct LoupeCLIActionErrorTrace: Codable {
+    var message: String
+    var recordedAt: Date
+}
+
+private final class LaunchPortProbe: @unchecked Sendable {
+    var result: Result<LoupeRuntimeState, Error>?
 }
 
 private enum ActionTargetSource: CustomStringConvertible {
