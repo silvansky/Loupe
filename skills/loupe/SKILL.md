@@ -99,10 +99,10 @@ loupe recordings
 loupe replay checkout-flow --udid booted --width 438 --height 954
 ```
 
-They currently delegate low-level HID dispatch to AXe. If dispatch fails, use
+They use Loupe's native host-side HID backend. If dispatch fails, use
 `loupe doctor` and the project docs rather than adding setup commands to this
-skill. `loupe pinch` is intentionally not listed above because AXe does not
-support pinch yet.
+skill. `loupe pinch` is intentionally not listed above because pinch dispatch is
+not implemented yet.
 
 Failed actions automatically create a trace under `/tmp/loupe-traces`. Trace
 bundles include before/after snapshots, accessibility trees, logs, screenshots,

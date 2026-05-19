@@ -48,10 +48,10 @@ fields, starts recording, performs a drag through the public Loupe action
 surface, captures a screenshot, stops recording, and verifies that touch events
 were recorded.
 
-Run the AXe scenario harness:
+Run the native HID scenario harness:
 
 ```bash
-./run-axe-scenarios.sh
+./run-native-scenarios.sh
 ```
 
 This repeats routed navigation fixtures, gesture pop, synthetic `UIBarButtonItem`

@@ -7,7 +7,8 @@
 Runtime E2E inspection and action harness for iOS Simulator apps.
 
 Loupe starts a small HTTP server inside the simulator app process, captures
-UIKit and accessibility state on demand, and delegates simulator input to AXe.
+UIKit and accessibility state on demand, and dispatches simulator input through
+its native HID backend.
 
 ## Install
 
@@ -50,9 +51,6 @@ loupe tap --udid <UDID> --x 201 --y 274
 loupe swipe --udid <UDID> --from 220,760 --to 220,190
 loupe type "Ada" --udid <UDID>
 ```
-
-`tap` intentionally does not accept text selectors. Prefer stable
-`accessibilityIdentifier` / `testID`, then Loupe refs, then coordinates.
 
 ## Debug
 
@@ -118,3 +116,9 @@ Examples/LoupeExample/run-bookmark-e2e.sh
 - [Runtime Communication](Docs/RuntimeCommunication.md)
 - [Homebrew Distribution](Docs/Homebrew.md)
 - [Development Homebrew Overlay](Docs/DevHomebrewOverlay.md)
+
+## Inspiration
+
+Loupe's simulator inspection and action direction is inspired by
+[AXe](https://github.com/cameroncooke/AXe) and
+[Baguette](https://github.com/tddworks/baguette).

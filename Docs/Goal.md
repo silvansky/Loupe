@@ -23,5 +23,5 @@ Current implementation stance:
 - Loupe owns app-side observation, selector resolution, runtime logs, recording,
   on-demand inspection, allowlisted runtime property mutation, initial layout
   audit checks, screenshots, replay shape, and CLI UX.
-- Low-level HID dispatch is currently delegated to AXe.
-- Native Loupe HID dispatch is the next backend milestone.
+- Low-level tap, drag, swipe, and type dispatch uses Loupe's native host-side
+  HID backend.

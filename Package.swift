@@ -44,9 +44,16 @@ let package = Package(
             name: "LoupeInjectionBootstrap",
             publicHeadersPath: "include"
         ),
+        .target(
+            name: "LoupeHID",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+            ]
+        ),
         .executableTarget(
             name: "LoupeCLI",
-            dependencies: ["LoupeCore"]
+            dependencies: ["LoupeCore", "LoupeHID"]
         ),
         .testTarget(
             name: "LoupeCoreTests",

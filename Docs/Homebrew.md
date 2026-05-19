@@ -9,8 +9,9 @@ brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
 brew install loupe
 ```
 
-`loupe` declares `cameroncooke/axe/axe` as a Homebrew dependency. Users should
-not need to install AXe separately.
+`loupe` does not require a separate simulator action CLI. The Homebrew formula
+builds the Loupe CLI and injector; runtime actions use Loupe's native HID
+backend.
 
 ## Tap Layout
 

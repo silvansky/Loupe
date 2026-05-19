@@ -6,8 +6,10 @@ import UIKit
 
 @_cdecl("LoupeInjectorStart")
 public func LoupeInjectorStart() {
-    Task { @MainActor in
-        LoupeInjectedRuntime.shared.start()
+    DispatchQueue.main.async {
+        Task { @MainActor in
+            LoupeInjectedRuntime.shared.start()
+        }
     }
 }
 
@@ -29,7 +31,6 @@ private final class LoupeInjectedRuntime {
         let server = LoupeServer()
 
         do {
-            LoupeRuntime.shared.activateBridge()
             try server.start(port: port)
             self.server = server
             NSLog("LoupeInjector started on port \(port)")

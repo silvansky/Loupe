@@ -1,0 +1,12 @@
+Loupe includes implementation notes and HID message structure details derived
+from Meta's idb project and Cameron Cooke's AXe project. Both are MIT licensed.
+
+idb
+Copyright (c) Meta Platforms, Inc. and affiliates.
+License: MIT
+Source: https://github.com/facebook/idb
+
+AXe
+Copyright (c) 2025 Cameron Cooke
+License: MIT
+Source: https://github.com/cameroncooke/AXe

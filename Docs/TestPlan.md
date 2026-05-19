@@ -8,10 +8,10 @@ harness.
 ## Implemented
 
 - Core unit tests use Swift Testing (`@Test`, `#expect`, `#require`).
-- AXe-backed runtime action smoke:
+- Native HID runtime action smoke:
   `Examples/LoupeExample/run-runtime-e2e.sh`
-- AXe-backed repeated scenarios:
-  `Examples/LoupeExample/run-axe-scenarios.sh`
+- Native HID repeated scenarios:
+  `Examples/LoupeExample/run-native-scenarios.sh`
 - Bookmark app-style E2E scenario:
   `Examples/LoupeExample/run-bookmark-e2e.sh`
 - Navigation pop by interactive edge gesture.
@@ -117,9 +117,7 @@ harness.
 
 ## Known Gaps
 
-- `loupe pinch` is still unsupported by the AXe backend.
-- `loupe tap` intentionally rejects text selectors; `testID`, `ref`, and
-  coordinate taps remain in the public contract.
+- `loupe pinch` is still unsupported by the native HID backend.
 - `loupe audit` does not yet assert spacing, alignment, z-order intent,
   clipping, truncation, or typography rules.
 - Compact observations expose UIKit identity, but component-specific properties
@@ -131,15 +129,15 @@ harness.
 - Native `UIAccessibility` traversal is opt-in and still needs guardrails before
   it can be part of the default runtime endpoint.
 - Screenshot baseline diffing is not implemented yet.
-- AXe is the only action backend. Native Loupe HID dispatch is still future
-  work.
+- Native HID dispatch covers tap, drag, swipe, and US-keyboard text input.
 - SwiftUI movement/input selectors are intentionally limited to elements exposed
   through the accessibility tree. Loupe does not synthesize selectors from
   private SwiftUI view-tree implementation details.
 
 ## Reference Projects To Mine
 
-- AXe: terminal-native simulator interaction and accessibility inspection.
+- idb and SimulatorKit HID references: lower-level simulator/device control and
+  HID primitives.
 - XcodeBuildMCP: agent-friendly Xcode, simulator lifecycle, logging, and UI
   automation workflows.
 - WebDriverAgent/Appium XCUITest driver: long-running HTTP action runner model,

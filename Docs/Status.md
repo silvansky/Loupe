@@ -98,8 +98,7 @@ compose.
   notifications. See `Docs/RuntimeCommunication.md`.
 - `loupe tap`, `swipe`, `drag`, `pinch`, `type`, `screenshot`, `record-start`,
   `record-stop`, `recording`, `logs`, and `replay` are available as CLI
-  commands. `loupe tap` intentionally rejects text selectors and accepts stable
-  `testID`, `ref`, or explicit coordinates.
+  commands.
 - `loupe runtime`, `logs`, `record-start`, `record-stop`, and `recording` accept
   `--udid` and validate that the connected Loupe host belongs to that simulator
   before mutating or reading runtime recorder state.
@@ -107,7 +106,7 @@ compose.
   `LOUPE_PORT` is not provided, records it under `~/.loupe/runtimes`, and waits
   for the injected runtime before returning. Later CLI commands can resolve the
   host from `--udid`.
-- `loupe fetch`, runtime fetches, screenshots, and AXe-backed actions have
+- `loupe fetch`, runtime fetches, screenshots, and native HID actions have
   bounded timeouts.
 - `loupe runtimes` / `loupe apps` lists known injected runtime hosts from
   `~/.loupe/runtimes` and probes live runtime state when available.
@@ -136,7 +135,8 @@ compose.
   runtime mutation into before/after summaries, target hierarchy context, and
   source candidates. This supports the intended view -> runtime edit -> verify
   -> code change loop without directly editing app code.
-- Runtime actions currently delegate HID dispatch to AXe.
+- Runtime actions dispatch tap, drag, swipe, and type through Loupe's native
+  host-side HID backend.
 - Selector-based runtime actions resolve through the accessibility tree first,
   using a valid accessibility activation point when it lies inside the element
   frame, then falling back to the accessibility frame center, then to the view
@@ -158,8 +158,8 @@ compose.
 - `loupe record start <alias>`, `loupe record stop`, `loupe recordings`, and
   `loupe replay <alias>` provide the alias-based recorder loop.
 - `Examples/LoupeExample/run-runtime-e2e.sh` verifies the XCTest-free runtime
-  smoke path when AXe is installed.
-- `Examples/LoupeExample/run-axe-scenarios.sh` repeats AXe-backed tap, gesture,
+  smoke path.
+- `Examples/LoupeExample/run-native-scenarios.sh` repeats native HID tap, gesture,
   accessibility-tree, UIKit component inspection, and layout audit scenarios.
 - `Examples/LoupeExample/run-bookmark-e2e.sh` verifies a bookmark app-style
   tabbed list/detail/favorites/search/add flow with text-tap rejection,
@@ -214,12 +214,10 @@ loupe wait-for-value --test-id example.components.switch --key uiKit.switch.isOn
 loupe type "Ada"
 ```
 
-The low-level HID backend is delegated to AXe for now. The Homebrew formula
-declares `cameroncooke/axe/axe` as a dependency, so users should not need a
-separate AXe install step when installing Loupe through the tap. Source checkouts
-still need `axe` on `PATH` for local runtime scripts. `loupe pinch` keeps the
-intended command shape, but AXe does not support pinch yet. A native
-`LoupeActionRunner` HID backend is still future work.
+The low-level HID backend is implemented inside Loupe with CoreSimulator and
+SimulatorKit private framework calls. The Homebrew formula does not install a
+separate action tool. `loupe pinch` keeps the intended command shape, but pinch
+dispatch is still future work.
 
 Native accessibility traversal through public in-app `UIAccessibility` container
 APIs is currently opt-in with `LOUPE_NATIVE_ACCESSIBILITY=1`; the default
@@ -251,7 +249,7 @@ The desired structure is:
 loupe CLI
   -> accessibility tree selector resolution for movement/input
   -> view tree selector resolution for UI/layout/style verification
-  -> delegated AXe backend today
+  -> native Loupe HID backend
   -> native runtime action runner process later
     -> fetch Loupe snapshot
     -> derive view tree and accessibility tree
@@ -266,14 +264,13 @@ This keeps observation and action separated:
 - `LoupeKit` / `LoupeInjector`: app-side observation and metadata.
 - `LoupeCore`: view tree models, accessibility tree models, selectors, refs,
   geometry, query, compact context.
-- AXe delegated backend: real simulator input without requiring XCTest as the
+- Native Loupe HID backend: real simulator input without requiring XCTest as the
   public harness.
-- `LoupeActionRunner` future target: native Loupe HID dispatch.
 - `loupe` CLI: stable public commands and trace output.
 
 ## Next Work
 
-1. Add native Loupe HID dispatch so action commands do not depend on AXe.
+1. Expand native Loupe HID dispatch to pinch and hardware-button events.
 2. Extend accessibility coverage for SwiftUI inner semantic elements.
 3. Add better selector scoring.
 4. Add screenshot baseline diff helpers.
@@ -282,6 +279,15 @@ This keeps observation and action separated:
    injector, and the Codex skill should discover that Homebrew path.
 
 ## Verified Commands
+
+2026-05-19 local note: the code-level checks below pass after embedding the
+native HID backend. `run-bookmark-e2e.sh` was re-run against iOS 26.3; the app
+could install and Loupe runtime could answer, but local CoreSimulator launch
+state regressed into `bootstatus` waits (`AddressBookLegacy.migrator` /
+`Waiting on System App`) and `SimLaunchHost.arm64` SIGBUS reports. The harness
+now fails fast around boot/install and records screenshots/logs instead of
+hanging, but this local simulator state needs a clean runtime/device before the
+bookmark flow can be re-validated end to end.
 
 ```bash
 swift test
@@ -296,7 +302,7 @@ Examples/LoupeExample/run-runtime-e2e.sh
 ```
 
 ```bash
-Examples/LoupeExample/run-axe-scenarios.sh
+Examples/LoupeExample/run-native-scenarios.sh
 ```
 
 ```bash

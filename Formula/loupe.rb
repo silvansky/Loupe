@@ -7,8 +7,6 @@ class Loupe < Formula
   head "https://github.com/heoblitz/Loupe.git", branch: "main"
 
   depends_on xcode: ["16.0", :build]
-  depends_on "cameroncooke/axe/axe"
-
   def install
     system "swift", "build",
       "--configuration", "release",

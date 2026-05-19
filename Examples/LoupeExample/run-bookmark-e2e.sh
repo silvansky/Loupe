@@ -6,12 +6,6 @@ PORT="${LOUPE_BOOKMARK_PORT:-8767}"
 
 cd "$ROOT_DIR"
 
-if ! command -v axe >/dev/null 2>&1; then
-  echo "error: bookmark E2E requires AXe on PATH" >&2
-  echo "hint: brew install cameroncooke/axe/axe" >&2
-  exit 2
-fi
-
 booted_udid() {
   xcrun simctl list devices booted --json | ruby -rjson -e '
     devices = JSON.parse(STDIN.read).fetch("devices").values.flatten
@@ -20,13 +14,67 @@ booted_udid() {
   '
 }
 
-DEVICE="$(booted_udid)"
+DEVICE="${LOUPE_BOOKMARK_DEVICE:-$(booted_udid)}"
 if [[ -z "$DEVICE" ]]; then
   FIRST_DEVICE="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
-  xcrun simctl boot "$FIRST_DEVICE"
-  DEVICE="$(booted_udid)"
+  if [[ -z "$FIRST_DEVICE" ]]; then
+    echo "error: no available iPhone simulator found" >&2
+    exit 1
+  fi
+  xcrun simctl boot "$FIRST_DEVICE" >/dev/null 2>&1 || true
+  DEVICE="$FIRST_DEVICE"
 fi
 
+terminate_app() {
+  xcrun simctl terminate "$DEVICE" dev.loupe.example >/dev/null 2>&1 &
+  local pid=$!
+  for _ in {1..50}; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      wait "$pid" >/dev/null 2>&1 || true
+      return
+    fi
+    sleep 0.1
+  done
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+}
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  "$@" &
+  local pid=$!
+  for _ in $(seq 1 "$((seconds * 10))"); do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      wait "$pid"
+      return
+    fi
+    sleep 0.1
+  done
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+  echo "error: command timed out after ${seconds}s: $*" >&2
+  return 124
+}
+
+assert_device_ready() {
+  local log_path="/tmp/loupe-bookmark-bootstatus.log"
+  if run_with_timeout 90 xcrun simctl bootstatus "$DEVICE" -b >"$log_path" 2>&1; then
+    return
+  fi
+
+  if run_with_timeout 5 xcrun simctl spawn "$DEVICE" launchctl print system >/dev/null 2>&1; then
+    echo "warning: bootstatus timed out, but simulator launchd responds; continuing" >&2
+    return
+  fi
+
+  xcrun simctl io "$DEVICE" screenshot /tmp/loupe-bookmark-boot-not-ready.png >/dev/null 2>&1 || true
+  echo "error: simulator $DEVICE did not finish booting; see $log_path and /tmp/loupe-bookmark-boot-not-ready.png" >&2
+  tail -40 "$log_path" >&2 || true
+  exit 124
+}
+
+assert_device_ready
 swift build
 
 xcodebuild \
@@ -54,8 +102,8 @@ APP_PATH="$(
     -print0 | xargs -0 ls -td | head -1
 )"
 
-xcrun simctl install "$DEVICE" "$APP_PATH"
-xcrun simctl terminate "$DEVICE" dev.loupe.example >/dev/null 2>&1 || true
+terminate_app
+run_with_timeout 30 xcrun simctl install "$DEVICE" "$APP_PATH"
 
 .build/debug/loupe launch \
   --device "$DEVICE" \
@@ -116,7 +164,7 @@ if .build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --text "Swift Document
   echo "error: tap --text unexpectedly succeeded" >&2
   exit 1
 fi
-grep -q 'tap does not support text selectors' /tmp/loupe-bookmark-text-tap.log
+grep -q 'tap expects --test-id, --ref, or coordinates' /tmp/loupe-bookmark-text-tap.log
 if .build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id bookmark.missing >/tmp/loupe-bookmark-missing-tap.out 2>/tmp/loupe-bookmark-missing-tap.err; then
   echo "error: missing target tap unexpectedly succeeded" >&2
   exit 1

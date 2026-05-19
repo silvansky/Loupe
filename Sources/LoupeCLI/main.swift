@@ -1,5 +1,6 @@
 import Foundation
 import LoupeCore
+import LoupeHID
 
 @main
 struct LoupeCLI {
@@ -519,7 +520,7 @@ struct LoupeCLI {
             environment["LOUPE_PORT"] = String(port)
             runtimeUDID = udid
             runtimeHost = host
-            terminateAppIfRunning(device: udid, bundleID: options.bundleID)
+            try terminateAppIfRunning(device: udid, bundleID: options.bundleID, timeout: min(5, options.timeout))
         }
 
         let request = SimctlLaunchRequest(
@@ -571,10 +572,12 @@ struct LoupeCLI {
         let simctl = Process()
         simctl.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         simctl.arguments = ["simctl", "help"]
+        simctl.standardOutput = Pipe()
+        simctl.standardError = Pipe()
         try simctl.run()
         simctl.waitUntilExit()
         print("simctl: \(simctl.terminationStatus == 0 ? "ok" : "unavailable")")
-        print("action backend axe: \(executablePath(named: "axe") ?? "not found")")
+        print("action backend native: ok")
     }
 
     private static func resolvedInjectorPath(explicitPath: String?) throws -> String? {
@@ -684,16 +687,16 @@ struct LoupeCLI {
                   Launch an iOS Simulator app through simctl. --inject auto-resolves LoupeInjector.
 
               tap (--test-id <id> | --ref <ref> | --x <n> --y <n>) --udid <sim> [--expect-visible <testID>]
-                  Resolve a stable Loupe target or coordinate and tap it through AXe. Text selectors are not supported.
+                  Resolve a Loupe target or coordinate and tap it through the native HID backend.
 
               swipe|drag --from x,y --to x,y --udid <sim>
-                  Dispatch a one-finger gesture through AXe. Add --trace-dir <path> to save before/after artifacts.
+                  Dispatch a one-finger gesture through the native HID backend. Add --trace-dir <path> to save before/after artifacts.
 
               pinch --center x,y --start-spread <n> --end-spread <n> --udid <sim>
-                  Parse a two-finger pinch request. AXe does not support pinch yet.
+                  Parse a two-finger pinch request. Pinch HID dispatch is not implemented yet.
 
               type <text> --udid <sim>
-                  Type text into the focused field through AXe.
+                  Type text into the focused field through the native HID backend.
 
               screenshot --udid <sim> --output <path> [--timeout <seconds>]
                   Capture a simulator screenshot through simctl.
@@ -714,7 +717,7 @@ struct LoupeCLI {
                   Alias-based recorder commands. Stopped recordings are saved under ~/.loupe/recordings.
 
               replay <recording.json|alias> --udid <sim>
-                  Replay a Loupe recording as AXe actions. Pinch events are not supported yet.
+                  Replay a Loupe recording as native HID actions. Pinch events are not supported yet.
             """
         )
     }
@@ -821,11 +824,13 @@ struct LoupeCLI {
             var bundleID = record.bundleID
             if let host = URL(string: record.host),
                let state = try? await fetchRuntimeState(host: host, timeout: options.timeout) {
-                live = true
-                simulator = state.identity.simulatorName ?? ""
-                pid = String(state.identity.processIdentifier)
-                startedAt = isoString(state.identity.startedAt)
-                bundleID = state.identity.bundleIdentifier ?? bundleID
+                live = runtimeState(state, matches: record)
+                if live {
+                    simulator = state.identity.simulatorName ?? ""
+                    pid = String(state.identity.processIdentifier)
+                    startedAt = isoString(state.identity.startedAt)
+                    bundleID = state.identity.bundleIdentifier ?? bundleID
+                }
             }
             rows.append(
                 RuntimeListRow(
@@ -853,6 +858,16 @@ struct LoupeCLI {
         for row in rows {
             print("\(row.udid)\t\(row.live ? "yes" : "no")\t\(row.bundleID)\t\(row.host)\t\(row.pid)\t\(row.simulator)\t\(row.startedAt)\t\(row.updatedAt)")
         }
+    }
+
+    private static func runtimeState(_ state: LoupeRuntimeState, matches record: LoupeRuntimeHostRecord) -> Bool {
+        guard state.identity.simulatorUDID == record.udid else {
+            return false
+        }
+        guard let bundleIdentifier = state.identity.bundleIdentifier else {
+            return true
+        }
+        return bundleIdentifier == record.bundleID
     }
 
     private static func record(_ arguments: [String]) async throws {
@@ -1408,14 +1423,21 @@ struct LoupeCLI {
         }
     }
 
-    private static func terminateAppIfRunning(device: String, bundleID: String) {
+    private static func terminateAppIfRunning(device: String, bundleID: String, timeout: TimeInterval) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl", "terminate", device, bundleID]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            semaphore.signal()
+        }
+        try process.run()
+        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            throw CLIError("simctl terminate timed out after \(format(timeout))s for \(bundleID) on \(device)")
+        }
     }
 
     private static func runtimeHostDirectory() -> URL {
@@ -1685,47 +1707,46 @@ struct LoupeCLI {
 
     private static func dispatchAction(command: String, options: ActionDispatchOptions, target: ActionTarget) throws {
         guard command != "pinch" else {
-            throw CLIError("pinch is not supported by the AXe backend yet")
+            throw CLIError("pinch is not supported by the native HID backend yet")
         }
 
-        let backend = try resolveBackend(options.backend)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: backend.path)
-        process.arguments = try axeArguments(command: command, options: options, target: target)
-        try run(process, label: "\(backend.name) \(command)", timeout: options.timeout)
-    }
-
-    private static func axeArguments(
-        command: String,
-        options: ActionDispatchOptions,
-        target: ActionTarget
-    ) throws -> [String] {
+        try validateActionBackend(options.backend)
         let udid = try resolvedBackendUDID(options.udid)
         let mappedPoint = mapToDisplayPoint(target.point)
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        let status: Int32
         switch command {
         case "tap":
-            return ["tap", "-x", format(mappedPoint.x), "-y", format(mappedPoint.y), "--udid", udid]
+            status = LoupeHIDTap(udid, mappedPoint.x, mappedPoint.y, target.screen.width, target.screen.height, &errorMessage)
         case "swipe", "drag":
             let end = try options.requireEndPoint(command: command)
             let mappedEnd = mapToDisplayPoint(end)
-            var arguments = [
-                "swipe",
-                "--start-x", format(mappedPoint.x),
-                "--start-y", format(mappedPoint.y),
-                "--end-x", format(mappedEnd.x),
-                "--end-y", format(mappedEnd.y),
-                "--udid", udid
-            ]
-            if let duration = options.duration {
-                arguments.append(contentsOf: ["--duration", format(duration)])
-            }
-            return arguments
+            status = LoupeHIDDrag(
+                udid,
+                mappedPoint.x,
+                mappedPoint.y,
+                mappedEnd.x,
+                mappedEnd.y,
+                target.screen.width,
+                target.screen.height,
+                options.duration ?? 0.6,
+                &errorMessage
+            )
         case "type":
-            return ["type", options.text ?? "", "--udid", udid]
+            status = LoupeHIDType(udid, options.text ?? "", &errorMessage)
         case "pinch":
-            throw CLIError("pinch is not supported by the AXe backend yet")
+            throw CLIError("pinch is not supported by the native HID backend yet")
         default:
-            throw CLIError("Unsupported AXe command: \(command)")
+            throw CLIError("Unsupported action command: \(command)")
+        }
+
+        if let errorMessage {
+            defer { LoupeHIDFreeCString(errorMessage) }
+            if status != 0 {
+                throw CLIError("native HID \(command) failed: \(String(cString: errorMessage))")
+            }
+        } else if status != 0 {
+            throw CLIError("native HID \(command) failed")
         }
     }
 
@@ -1762,16 +1783,10 @@ struct LoupeCLI {
         return LoupeSize(width: Double(width) / scale, height: Double(height) / scale)
     }
 
-    private static func resolveBackend(_ requested: String) throws -> ActionBackend {
-        guard requested == "auto" || requested == "axe" else {
-            throw CLIError("Unsupported action backend: \(requested). Loupe currently supports AXe only.")
+    private static func validateActionBackend(_ requested: String) throws {
+        guard requested == "auto" || requested == "native" else {
+            throw CLIError("Unsupported action backend: \(requested). Loupe currently supports native only.")
         }
-
-        if let path = executablePath(named: "axe") {
-            return ActionBackend(name: "axe", path: path)
-        }
-
-        throw CLIError("No action backend found. Install Loupe through Homebrew so AXe is installed as a dependency, or put `axe` on PATH for source builds.")
     }
 
     private static func resolvedBackendUDID(_ requested: String) throws -> String {
@@ -3663,16 +3678,16 @@ private struct ActionOptions: ActionDispatchOptions {
                 if command == "type" {
                     text = value
                 } else if command == "tap" {
-                    throw CLIError("tap does not support text selectors; use --test-id, --ref, or coordinates")
+                    throw CLIError("tap expects --test-id, --ref, or coordinates")
                 } else {
-                    throw CLIError("\(command) does not support --text selectors; use --test-id, --ref, or coordinates")
+                    throw CLIError("\(command) expects --test-id, --ref, or coordinates")
                 }
             case "--exact-text":
                 _ = try Self.value(after: argument, in: arguments, index: &index)
                 if command == "tap" {
-                    throw CLIError("tap does not support text selectors; use --test-id, --ref, or coordinates")
+                    throw CLIError("tap expects --test-id, --ref, or coordinates")
                 }
-                throw CLIError("\(command) does not support --exact-text selectors; use --test-id, --ref, or coordinates")
+                throw CLIError("\(command) expects --test-id, --ref, or coordinates")
             case "--x":
                 let x = try Self.double(after: argument, in: arguments, index: &index)
                 let y = point?.y ?? 0
@@ -3810,7 +3825,7 @@ private struct ReplayOptions {
 
     init(_ arguments: [String]) throws {
         guard let path = arguments.first, !path.hasPrefix("--") else {
-            throw CLIError("Usage: loupe replay <recording.json|alias> --udid <sim> --width <points> --height <points> [--host <url>] [--backend auto|axe]")
+            throw CLIError("Usage: loupe replay <recording.json|alias> --udid <sim> --width <points> --height <points> [--host <url>] [--backend auto|native]")
         }
 
         let fileURL = URL(fileURLWithPath: path)

@@ -36,9 +36,6 @@ Use this file as a map, not as a full manual. Keep deeper project state in
   for tap.
 - Keep full snapshots on disk. Send compact observations to agents by default,
   then query or inspect specific refs on demand.
-- Prefer stable `testID` / `accessibilityIdentifier` selectors over text or
-  geometry when test intent is known.
-
 ## Verification
 
 Run the fast SwiftPM tests. Core unit tests use Swift Testing (`import Testing`,
@@ -54,11 +51,11 @@ Verify simulator injection and observation:
 Examples/LoupeExample/run-injected.sh
 ```
 
-Verify AXe-backed runtime gestures, accessibility tree export/query, UIKit
+Verify native HID runtime gestures, accessibility tree export/query, UIKit
 component inspection, and layout audit:
 
 ```bash
-Examples/LoupeExample/run-axe-scenarios.sh
+Examples/LoupeExample/run-native-scenarios.sh
 ```
 
 Verify the bookmark app-style E2E route:
@@ -88,7 +85,6 @@ Examples/LoupeExample/run-loupe-driven-ui-test.sh
 ## Known Boundary
 
 `loupe tap`, `loupe swipe`, `loupe drag`, and `loupe type` exist as runtime
-commands. They depend on AXe for HID dispatch for now. `loupe tap` supports
-`testID`, `ref`, and coordinates, but not text selectors. `loupe pinch` keeps
-the intended API shape, but AXe does not support pinch yet. The current UI test
-remains a legacy proof only.
+commands. They use Loupe's native HID dispatch for tap, drag, swipe, and type.
+`loupe pinch` keeps the intended API shape but is not implemented yet. The
+current UI test remains a legacy proof only.

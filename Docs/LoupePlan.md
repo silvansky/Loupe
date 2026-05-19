@@ -22,7 +22,7 @@ Host runner
   - stores full snapshots
   - sends compact observations to the LLM
   - executes actions through Loupe runtime commands
-  - currently delegates low-level HID dispatch to AXe
+  - dispatches low-level input through Loupe's native HID backend
   - stores screenshots, diffs, logs, and traces
 
 LoupeKit
@@ -72,11 +72,9 @@ loupe tap --test-id checkout.payButton
   -> store trace artifacts
 ```
 
-The current proof for this flow lives in the example UI test and
-`Examples/LoupeExample/run-loupe-driven-ui-test.sh`, but that proof should be
-productized into Loupe CLI runtime actions rather than kept as the architecture.
-The public `loupe tap` command supports stable selectors and coordinates, but
-not text selectors.
+The current proof for this flow has been productized into Loupe CLI runtime
+actions. The older example UI test remains useful as a compatibility check, not
+as the primary action architecture.
 
 ## Observation Policy
 
@@ -177,11 +175,10 @@ expect("checkout.payButton").toBeBelow("checkout.password", spacing: 16)
 
 ## Next Implementation Steps
 
-1. Add a runtime action runner that the CLI can drive without XCTest.
-2. Replace the temporary AXe delegated backend with native Loupe HID dispatch.
-3. Add trace artifacts for every action: before/after snapshots, screenshots,
+1. Expand native HID coverage for pinch and hardware-button events.
+2. Add trace artifacts for every action: before/after snapshots, screenshots,
    target resolution, and logs.
-4. Add screenshot capture and baseline diff storage.
-5. Add richer selector scoring.
-6. Expand layout/style assertion primitives.
-7. Add a generated Codex skill/package release flow.
+3. Add screenshot capture and baseline diff storage.
+4. Add richer selector scoring.
+5. Expand layout/style assertion primitives.
+6. Add a generated Codex skill/package release flow.
