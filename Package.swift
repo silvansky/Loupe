@@ -67,5 +67,9 @@ let package = Package(
             name: "LoupeCLIModelTests",
             dependencies: ["LoupeCLIModel"]
         ),
+        .testTarget(
+            name: "LoupeCLITests",
+            dependencies: ["LoupeCLI"]
+        ),
     ]
 )

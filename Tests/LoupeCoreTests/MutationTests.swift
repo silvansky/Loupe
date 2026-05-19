@@ -16,6 +16,22 @@ import Testing
         #expect(decoded == request)
     }
 
+    @Test func mutationRequestRoundTripsAnimationOptions() throws {
+        let request = LoupeMutationRequest(
+            selector: LoupeMutationSelector(kind: .testID, value: "example.card"),
+            property: "frame",
+            value: .rect(LoupeRect(x: 20, y: 120, width: 220, height: 80)),
+            animation: LoupeMutationAnimation(duration: 0.4, delay: 0.1, curve: "linear")
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let decoded = try JSONDecoder().decode(LoupeMutationRequest.self, from: data)
+
+        #expect(decoded.animation?.duration == 0.4)
+        #expect(decoded.animation?.delay == 0.1)
+        #expect(decoded.animation?.curve == "linear")
+    }
+
     @Test func mutationReflectionKeepsHierarchyContextAndSourceCandidates() throws {
         let target = LoupeMutationNodeSummary(
             ref: "n3",

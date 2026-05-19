@@ -116,6 +116,7 @@ arbitrary Objective-C selectors. The public shape is:
 loupe set --test-id checkout.title text "New title"
 loupe set --test-id checkout.card backgroundColor --color '#ff3366'
 loupe set --test-id checkout.card frame --rect 20,120,220,80
+loupe set --test-id checkout.card frame --rect 20,120,220,80 --no-animate
 loupe set --list
 ```
 
@@ -124,6 +125,10 @@ typed value. Supported properties are intentionally allowlisted: frame/bounds,
 alpha, hidden, background/text/border colors, corner radius, accessibility
 strings, label/button/text field text, font size, text alignment, and common
 control values.
+
+`loupe set` animates property mutations by default for visual iteration. Use
+`--no-animate` for immediate application, or pass `--duration`, `--delay`, and
+`--curve` when a specific animation is needed.
 
 Mutation support is registry-based, not a single hard-coded switch. New UIKit
 coverage should be added as a descriptor group in `LoupeAgent`: view, layer,

@@ -188,14 +188,13 @@ public final class LoupeAgent {
             )
         }
 
-        try applyMutation(property: request.property, value: request.value, to: view)
-
-        if request.layout {
-            view.setNeedsLayout()
-            view.layoutIfNeeded()
-            view.superview?.setNeedsLayout()
-            view.superview?.layoutIfNeeded()
-        }
+        try applyMutation(
+            property: request.property,
+            value: request.value,
+            to: view,
+            layout: request.layout,
+            animation: request.animation
+        )
 
         LoupeRuntime.shared.log(
             level: "info",
@@ -227,6 +226,7 @@ public final class LoupeAgent {
             requested: request.value,
             effective: effective,
             changed: changed,
+            animation: request.animation,
             warning: warning,
             snapshotID: afterCapture.snapshot.id
         )
@@ -761,14 +761,80 @@ private func mutationNodeSummary(_ node: LoupeNode) -> LoupeMutationNodeSummary 
 }
 
 @MainActor
-private func applyMutation(property: String, value: LoupeMutationValue, to view: UIView) throws {
+private func applyMutation(
+    property: String,
+    value: LoupeMutationValue,
+    to view: UIView,
+    layout: Bool,
+    animation: LoupeMutationAnimation?
+) throws {
     let property = normalizedMutationProperty(property)
     guard let descriptor = mutationDescriptors.first(where: { $0.aliases.contains(property) }) else {
         throw unsupportedProperty(property, view: view)
     }
 
-    try descriptor.apply(view, value)
-    view.setNeedsDisplay()
+    let changes = {
+        do {
+            LoupeMutationAnimationErrorBox.clear()
+            try descriptor.apply(view, value)
+            view.setNeedsDisplay()
+            if layout {
+                view.setNeedsLayout()
+                view.superview?.setNeedsLayout()
+                view.layoutIfNeeded()
+                view.superview?.layoutIfNeeded()
+            }
+        } catch {
+            LoupeMutationAnimationErrorBox.current = error
+        }
+    }
+
+    guard let animation else {
+        LoupeMutationAnimationErrorBox.clear()
+        changes()
+        if let error = LoupeMutationAnimationErrorBox.take() {
+            throw error
+        }
+        return
+    }
+
+    UIView.animate(
+        withDuration: animation.duration,
+        delay: animation.delay,
+        options: animationOptions(animation.curve),
+        animations: changes
+    )
+    if let error = LoupeMutationAnimationErrorBox.take() {
+        throw error
+    }
+}
+
+@MainActor
+private enum LoupeMutationAnimationErrorBox {
+    static var current: Error?
+
+    static func take() -> Error? {
+        let error = current
+        current = nil
+        return error
+    }
+
+    static func clear() {
+        current = nil
+    }
+}
+
+private func animationOptions(_ curve: String) -> UIView.AnimationOptions {
+    switch curve.lowercased() {
+    case "linear":
+        return [.curveLinear, .beginFromCurrentState]
+    case "easein":
+        return [.curveEaseIn, .beginFromCurrentState]
+    case "easeout":
+        return [.curveEaseOut, .beginFromCurrentState]
+    default:
+        return [.curveEaseInOut, .beginFromCurrentState]
+    }
 }
 
 private func mutationPropertyValue(_ property: String, in node: LoupeNode) -> LoupeMutationValue? {

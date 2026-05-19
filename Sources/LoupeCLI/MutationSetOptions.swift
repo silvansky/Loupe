@@ -24,6 +24,10 @@ struct MutationSetOptions {
         var rawValue: String?
         var valueType = "auto"
         var layout = true
+        var animate = true
+        var animationDuration = 0.25
+        var animationDelay = 0.0
+        var animationCurve = "easeInOut"
         var positionals: [String] = []
         var index = 0
 
@@ -77,6 +81,16 @@ struct MutationSetOptions {
                 rawValue = try Self.value(after: "--size", in: arguments, index: &index)
             case "--no-layout":
                 layout = false
+            case "--animate":
+                animate = true
+            case "--no-animate":
+                animate = false
+            case "--duration":
+                animationDuration = try Self.double(after: "--duration", in: arguments, index: &index)
+            case "--delay":
+                animationDelay = try Self.double(after: "--delay", in: arguments, index: &index)
+            case "--curve":
+                animationCurve = try Self.value(after: "--curve", in: arguments, index: &index)
             case "--help", "-h":
                 throw CLIError(Self.usage)
             default:
@@ -109,9 +123,26 @@ struct MutationSetOptions {
         guard timeout > 0 else {
             throw CLIError("--timeout must be greater than 0")
         }
+        if animate {
+            guard animationDuration > 0 else {
+                throw CLIError("--duration must be greater than 0")
+            }
+            guard animationDelay >= 0 else {
+                throw CLIError("--delay must be greater than or equal to 0")
+            }
+        }
 
         let value = try Self.mutationValue(rawValue, type: valueType, property: property)
-        request = LoupeMutationRequest(selector: selector, property: property, value: value, layout: layout)
+        let animation = animate
+            ? LoupeMutationAnimation(duration: animationDuration, delay: animationDelay, curve: animationCurve)
+            : nil
+        request = LoupeMutationRequest(
+            selector: selector,
+            property: property,
+            value: value,
+            layout: layout,
+            animation: animation
+        )
     }
 
     static let usage = """
@@ -119,6 +150,8 @@ struct MutationSetOptions {
            loupe set --test-id card.title text "New title"
            loupe set --test-id card backgroundColor --color '#ff3366'
            loupe set --test-id card frame --rect 20,120,220,80
+           loupe set --test-id card frame --rect 20,120,220,80 --duration 0.3
+           loupe set --test-id card frame --rect 20,120,220,80 --no-animate
     """
 
     private static func mutationValue(_ rawValue: String, type: String, property: String) throws -> LoupeMutationValue {

@@ -109,17 +109,32 @@ public struct LoupeMutationRequest: Codable, Equatable {
     public var property: String
     public var value: LoupeMutationValue
     public var layout: Bool
+    public var animation: LoupeMutationAnimation?
 
     public init(
         selector: LoupeMutationSelector,
         property: String,
         value: LoupeMutationValue,
-        layout: Bool = true
+        layout: Bool = true,
+        animation: LoupeMutationAnimation? = nil
     ) {
         self.selector = selector
         self.property = property
         self.value = value
         self.layout = layout
+        self.animation = animation
+    }
+}
+
+public struct LoupeMutationAnimation: Codable, Equatable {
+    public var duration: Double
+    public var delay: Double
+    public var curve: String
+
+    public init(duration: Double = 0.25, delay: Double = 0, curve: String = "easeInOut") {
+        self.duration = duration
+        self.delay = delay
+        self.curve = curve
     }
 }
 
@@ -134,6 +149,7 @@ public struct LoupeMutationResponse: Codable, Equatable {
     public var requested: LoupeMutationValue?
     public var effective: LoupeMutationValue?
     public var changed: Bool?
+    public var animation: LoupeMutationAnimation?
     public var warning: String?
     public var snapshotID: String
 
@@ -148,6 +164,7 @@ public struct LoupeMutationResponse: Codable, Equatable {
         requested: LoupeMutationValue? = nil,
         effective: LoupeMutationValue? = nil,
         changed: Bool? = nil,
+        animation: LoupeMutationAnimation? = nil,
         warning: String? = nil,
         snapshotID: String
     ) {
@@ -161,6 +178,7 @@ public struct LoupeMutationResponse: Codable, Equatable {
         self.requested = requested
         self.effective = effective
         self.changed = changed
+        self.animation = animation
         self.warning = warning
         self.snapshotID = snapshotID
     }

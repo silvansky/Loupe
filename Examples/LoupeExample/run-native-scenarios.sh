@@ -328,12 +328,18 @@ grep -q '"issues"' "$AUDIT_PATH"
 echo "case: frame, Auto Layout, and stack view runtime mutations"
 .build/debug/loupe set --host "$HOST" --test-id example.design.card frame --rect 20,220,320,140 --output "$FRAME_MUTATION_PATH"
 grep -q '"property" : "frame"' "$FRAME_MUTATION_PATH"
+grep -q '"animation"' "$FRAME_MUTATION_PATH"
+grep -q '"duration"' "$FRAME_MUTATION_PATH"
 grep -q '"requested"' "$FRAME_MUTATION_PATH"
 grep -q '"effective"' "$FRAME_MUTATION_PATH"
 grep -q '"changed"' "$FRAME_MUTATION_PATH"
 
-.build/debug/loupe set --host "$HOST" --test-id example.components.label layout.hugging.horizontal --number 260.5 --output "$LAYOUT_MUTATION_PATH"
+.build/debug/loupe set --host "$HOST" --test-id example.components.label layout.hugging.horizontal --number 260.5 --no-animate --output "$LAYOUT_MUTATION_PATH"
 grep -q '"property" : "layout.hugging.horizontal"' "$LAYOUT_MUTATION_PATH"
+if grep -q '"animation"' "$LAYOUT_MUTATION_PATH"; then
+  echo "error: --no-animate mutation unexpectedly included animation" >&2
+  exit 1
+fi
 grep -q '"changed" : true' "$LAYOUT_MUTATION_PATH"
 grep -q '"value" : 260.5' "$LAYOUT_MUTATION_PATH"
 

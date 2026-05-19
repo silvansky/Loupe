@@ -117,6 +117,8 @@ compose.
 - `loupe set` posts to the injected `/mutate` endpoint and can update
   allowlisted UIKit view properties such as frame, alpha, colors, text,
   accessibility fields, layer styling, and common control values.
+  Property mutations animate by default; `--no-animate` opts out for immediate
+  changes.
 - `loupe constraints`, `set-constraint`, and `deactivate-constraint` expose
   captured Auto Layout constraints and verify the effective constant, priority,
   or active state after runtime mutation.
@@ -198,6 +200,7 @@ loupe set --list
 loupe set --test-id example.components.label text "Runtime edited" --output /tmp/loupe-set.json
 loupe reflect /tmp/loupe-set.json --source Examples/LoupeExample/LoupeExample
 loupe set --test-id example.design.card backgroundColor --color '#ff3366'
+loupe set --test-id example.design.card frame --rect 20,120,220,80 --no-animate
 loupe wait-for-visible --test-id example.detail --timeout 5
 loupe wait-for-gone --test-id example.loading --timeout 5
 loupe wait-for-value --test-id example.components.switch --key uiKit.switch.isOn --equals true

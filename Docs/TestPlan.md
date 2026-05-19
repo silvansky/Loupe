@@ -84,7 +84,8 @@ and the generated `/tmp/loupe-*` logs or screenshots before handing work back.
 - Runtime mutation:
   `loupe set --test-id <id> <property> <value>` posts a typed mutation to the
   injected server and verifies the after snapshot reflects the allowlisted
-  UIKit property change.
+  UIKit property change. Property mutations animate by default, and
+  `--no-animate` verifies the immediate path.
 - Runtime mutation discovery:
   `loupe set --list` / `/mutations` exposes the active mutation property
   registry for agent planning.

@@ -1,13 +1,13 @@
-<p align="left">
-  <img src="Docs/Assets/loupe-logo.svg" alt="Loupe" width="80">
-</p> 
+<p align="center">
+  <img src="Docs/Assets/loupe-wordmark.svg" alt="Loupe" width="360">
+</p>
 
-# Loupe
 Runtime E2E inspection and action harness for iOS Simulator apps.
 
-Loupe starts a small HTTP server inside the simulator app process, captures
-UIKit and accessibility state on demand, and dispatches simulator input through
-its native HID backend.
+Loupe injects a lightweight runtime into a simulator app, exposes UIKit and
+accessibility state over localhost, and lets you mutate supported UIKit
+properties live. Use it to inspect what is actually on screen, try a runtime UI
+change, verify the effective value, then reflect the change back into source.
 
 ## Demo
 https://github.com/user-attachments/assets/52471c43-ec43-4654-9477-b06413660734
@@ -21,19 +21,38 @@ brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
 brew install loupe
 ```
 
+Install the Loupe agent skill:
+
+```bash
+loupe skills install
+```
+
+## Environment
+
+Loupe is for iOS Simulator only; it does not run against physical devices.
+It requires macOS with Xcode and iOS Simulator installed. Because Loupe uses
+simulator runtime injection and host-side simulator input, Xcode and iOS
+Simulator versions can affect compatibility. When multiple simulators are
+booted, pass the exact simulator UDID.
+
 ## Start
 
-Build and install your iOS app on a simulator, then launch it through Loupe:
+Start from an agent context:
+
+```text
+Use Loupe to inspect a running iOS UI, compare it with the design guide, and improve implementation quality through iteration.
+```
+
+If you want direct CLI control:
 
 ```bash
 loupe start --bundle-id com.example.App --device booted
-loupe runtime --udid booted
+loupe current
 ```
 
-`start` injects Loupe into the app and waits for the in-app runtime server. When
-multiple simulators are booted, pass the exact simulator UDID. Loupe chooses an
-available localhost port unless `--port` is provided, prints the runtime host,
-and records it for later `--udid` or `--bundle-id` commands.
+When multiple simulators are booted, pass an exact UDID. Loupe chooses an
+available localhost port, records the runtime, and resolves later commands by
+`--udid` or `--bundle-id`.
 
 ## Observe
 
@@ -46,8 +65,8 @@ loupe inspect snapshot.json --test-id checkout.payButton
 loupe compact snapshot.json
 ```
 
-Use the accessibility tree for movement and input targets. Use the view tree for
-layout, UIKit properties, color, size, and design checks.
+Use accessibility for targets and text. Use the view tree for layout, UIKit
+properties, color, size, and mutation refs.
 
 ## Act
 
@@ -59,52 +78,41 @@ loupe swipe --udid <UDID> --from 220,760 --to 220,190
 loupe type "Ada" --udid <UDID>
 ```
 
+## Mutate
+
+```bash
+loupe mutations --udid <UDID> --ref n42
+loupe set --udid <UDID> --test-id checkout.title text "Runtime title" --output mutation.json
+loupe set --udid <UDID> --test-id checkout.card backgroundColor --color '#ff3366'
+loupe set --udid <UDID> --test-id checkout.card frame --rect 20,120,220,80
+loupe set --udid <UDID> --test-id checkout.card frame --rect 20,120,220,80 --no-animate
+loupe reflect mutation.json --source ./Sources
+```
+
+Runtime property mutations animate by default. Pass `--no-animate` for immediate
+application or tune with `--duration`, `--delay`, and `--curve`.
+
+## Layout
+
+```bash
+loupe constraints --udid <UDID> --test-id checkout.card --json
+loupe set-constraint --udid <UDID> --id c0x123 constant 120
+loupe deactivate-constraint --udid <UDID> --id c0x123
+```
+
+Loupe reports requested and effective values so layout-owned changes are visible
+instead of silently accepted.
+
 ## Debug
 
 ```bash
 loupe trace-summary /tmp/loupe-trace
-loupe diff /tmp/loupe-trace/before-snapshot.json /tmp/loupe-trace/after-snapshot.json
+loupe diff before-snapshot.json after-snapshot.json
 loupe audit snapshot.json
-loupe compare-design snapshot.json figma-export.json
-```
-
-Failed actions automatically write traces under the system temporary
-`loupe-traces` directory. Successful traced actions include `target-crop.png`
-when Loupe resolved a framed target.
-
-## Mutate
-
-```bash
-loupe tree --udid <UDID> --view --depth 3
-loupe set --udid <UDID> --test-id checkout.title text "Runtime title" --output mutation.json
-loupe inspect snapshot.json --test-id checkout.title
-loupe reflect mutation.json --source ./Sources
-loupe set --udid <UDID> --test-id checkout.card backgroundColor --color '#ff3366'
-loupe set --udid <UDID> --test-id checkout.card frame --rect 20,120,220,80
-loupe constraints --udid <UDID> --test-id checkout.card --json
-loupe set-constraint --udid <UDID> --id c0x123 constant 120
-loupe deactivate-constraint --udid <UDID> --id c0x123
-loupe set --udid <UDID> --list
-```
-
-`set` updates allowlisted UIKit properties inside the injected app process.
-`constraints`, `set-constraint`, and `deactivate-constraint` expose captured
-Auto Layout constraints and report the effective constraint state after runtime
-mutation.
-`reflect` turns a mutation response into before/after summaries, hierarchy
-context, and source candidates so an agent can decide the smallest matching code
-change.
-
-## Maintenance
-
-```bash
-loupe skills install
 loupe cleanup --dry-run
-loupe cleanup
 ```
 
-`skills install` upserts the Loupe skill into existing Codex or Claude Code
-skill folders. `cleanup` removes stale runtime records and old trace bundles.
+Failed actions write traces under the system temporary `loupe-traces` directory.
 
 ## Verify
 
