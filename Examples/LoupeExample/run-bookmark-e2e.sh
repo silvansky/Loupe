@@ -94,6 +94,8 @@ echo "case: bookmark list observation"
 .build/debug/loupe runtime --host "$HOST" --udid "$DEVICE" --timeout 5 >/tmp/loupe-bookmark-runtime.json
 .build/debug/loupe runtimes --json >/tmp/loupe-bookmark-runtimes.json
 grep -q "dev.loupe.example" /tmp/loupe-bookmark-runtimes.json
+.build/debug/loupe set --host "$HOST" --udid "$DEVICE" --list >/tmp/loupe-bookmark-mutations.json
+grep -q '"property" : "backgroundcolor"' /tmp/loupe-bookmark-mutations.json
 fetch_snapshot
 assert_query bookmark.tabs /tmp/loupe-bookmark-tabs-query.json
 assert_query bookmark.tabbar /tmp/loupe-bookmark-tabbar-query.json
@@ -136,9 +138,19 @@ grep -q "bookmark.detail" /tmp/loupe-bookmark-action-diff.txt
 .build/debug/loupe wait-for-visible --host "$HOST" --test-id bookmark.detail --timeout 5 >/tmp/loupe-bookmark-wait-detail.json
 fetch_snapshot
 assert_query bookmark.detail /tmp/loupe-bookmark-detail-query.json
+.build/debug/loupe set --host "$HOST" --udid "$DEVICE" --test-id bookmark.detail.title text "Runtime Edited Bookmark" >/tmp/loupe-bookmark-set-title.json
+fetch_snapshot
+.build/debug/loupe inspect "$SNAPSHOT_PATH" --test-id bookmark.detail.title > "$INSPECT_PATH"
+grep -q '"text" : "Runtime Edited Bookmark"' "$INSPECT_PATH"
+.build/debug/loupe reflect /tmp/loupe-bookmark-set-title.json --source Examples/LoupeExample/LoupeExample >/tmp/loupe-bookmark-reflect-title.json
+grep -q 'BookmarkViewController.swift' /tmp/loupe-bookmark-reflect-title.json
+grep -q 'Runtime Edited Bookmark' /tmp/loupe-bookmark-reflect-title.json
 .build/debug/loupe inspect "$SNAPSHOT_PATH" --test-id bookmark.detail.favorite > "$INSPECT_PATH"
 grep -q '"className" : "UISwitch"' "$INSPECT_PATH"
 grep -q '"isOn" : true' "$INSPECT_PATH"
+.build/debug/loupe set --host "$HOST" --udid "$DEVICE" --test-id bookmark.detail.favorite switch.isOn false >/tmp/loupe-bookmark-set-favorite-off.json
+.build/debug/loupe wait-for-value --host "$HOST" --test-id bookmark.detail.favorite --key uiKit.switch.isOn --equals false --timeout 5 >/tmp/loupe-bookmark-wait-set-favorite-off.json
+.build/debug/loupe set --host "$HOST" --udid "$DEVICE" --test-id bookmark.detail.favorite switch.isOn true >/tmp/loupe-bookmark-set-favorite-on.json
 .build/debug/loupe wait-for-value --host "$HOST" --test-id bookmark.detail.favorite --key uiKit.switch.isOn --equals true --timeout 5 >/tmp/loupe-bookmark-wait-favorite-on.json
 .build/debug/loupe tap --host "$HOST" --udid "$DEVICE" --test-id bookmark.detail.favorite.toggle --expect-visible bookmark.detail
 .build/debug/loupe wait-for-value --host "$HOST" --test-id bookmark.detail.favorite --key uiKit.switch.isOn --equals false --timeout 5 >/tmp/loupe-bookmark-wait-favorite-off.json

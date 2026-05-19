@@ -13,13 +13,15 @@ The project goal is:
    on-demand inspection, layout audits, logs, recording, and app-authored
    diagnostic events.
 6. Record human or CLI-driven gesture flows and replay them as Loupe actions.
-7. Keep reproducible traces and smoke harnesses in the repository as the source
+7. Let developers patch supported UIKit view properties at runtime so UI/design
+   iteration can happen from the CLI without rebuilding the app.
+8. Keep reproducible traces and smoke harnesses in the repository as the source
    of truth.
 
 Current implementation stance:
 
 - Loupe owns app-side observation, selector resolution, runtime logs, recording,
-  on-demand inspection, initial layout audit checks, screenshots, replay shape,
-  and CLI UX.
+  on-demand inspection, allowlisted runtime property mutation, initial layout
+  audit checks, screenshots, replay shape, and CLI UX.
 - Low-level HID dispatch is currently delegated to AXe.
 - Native Loupe HID dispatch is the next backend milestone.

@@ -126,6 +126,16 @@ compose.
   runtime server without requiring users to think about `DYLD_INSERT_LIBRARIES`.
 - `loupe cleanup` removes stale runtime host records and old trace bundles.
   Recordings are kept by default and pruned only when requested.
+- `loupe set` posts to the injected `/mutate` endpoint and can update
+  allowlisted UIKit view properties such as frame, alpha, colors, text,
+  accessibility fields, layer styling, and common control values.
+- `loupe set --list` and `/mutations` list the runtime mutation registry.
+  Mutation support is grouped by UIKit family so new components can be added
+  without expanding a single hard-coded switch.
+- `loupe reflect <mutation-response.json> --source <dir>` converts a verified
+  runtime mutation into before/after summaries, target hierarchy context, and
+  source candidates. This supports the intended view -> runtime edit -> verify
+  -> code change loop without directly editing app code.
 - Runtime actions currently delegate HID dispatch to AXe.
 - Selector-based runtime actions resolve through the accessibility tree first,
   using a valid accessibility activation point when it lies inside the element
@@ -194,6 +204,10 @@ loupe trace-summary /tmp/loupe-trace
 loupe skills install --target codex
 loupe start --bundle-id dev.loupe.example --device booted
 loupe cleanup --dry-run
+loupe set --list
+loupe set --test-id example.components.label text "Runtime edited" --output /tmp/loupe-set.json
+loupe reflect /tmp/loupe-set.json --source Examples/LoupeExample/LoupeExample
+loupe set --test-id example.design.card backgroundColor --color '#ff3366'
 loupe wait-for-visible --test-id example.detail --timeout 5
 loupe wait-for-gone --test-id example.loading --timeout 5
 loupe wait-for-value --test-id example.components.switch --key uiKit.switch.isOn --equals true

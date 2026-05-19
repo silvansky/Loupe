@@ -2,21 +2,10 @@
 
 Use this skill when working with iOS Simulator UI automation, view-tree inspection, compact screen context, or Loupe injection.
 
-## Tooling Assumptions
+## Runtime Assumptions
 
-Prefer the Homebrew installation:
-
-```bash
-brew install loupe
-```
-
-The Homebrew package installs:
-
-- `loupe` CLI on `PATH`
-- `LoupeInjector.framework/LoupeInjector` under Homebrew `libexec`
-- AXe for low-level simulator input
-
-Do not hard-code DerivedData injector paths. Resolve the injector through Loupe:
+Use the installed `loupe` command. Do not hard-code DerivedData injector paths;
+resolve the injector through Loupe when the path matters:
 
 ```bash
 loupe injector-path
@@ -24,14 +13,15 @@ loupe injector-path
 
 ## Build And Inject Workflow
 
-For an app that has already been built with `xcodebuild`, install and launch it on the simulator through Loupe:
+For an app that has already been built, place and launch it on the simulator
+through Loupe:
 
 ```bash
 xcrun simctl install booted /path/to/App.app
 loupe start --bundle-id com.example.App
 ```
 
-`loupe start` resolves the Homebrew injector path, launches the app with
+`loupe start` resolves the configured injector path, launches the app with
 injection, and waits for the in-app Loupe server. It is a wrapper around
 `loupe launch --inject`; Loupe does not need a separate host-side server.
 
@@ -82,6 +72,9 @@ loupe trace-summary /tmp/loupe-trace
 loupe diff /tmp/loupe-trace/before-snapshot.json /tmp/loupe-trace/after-snapshot.json
 loupe audit /tmp/loupe-trace/after-snapshot.json
 loupe compare-design /tmp/loupe-trace/after-snapshot.json figma-export.json
+loupe set --list
+loupe set --test-id example.design.card backgroundColor --color '#ff3366' --output /tmp/loupe-set.json
+loupe reflect /tmp/loupe-set.json --source ./Sources
 loupe cleanup --dry-run
 ```
 
@@ -106,26 +99,17 @@ loupe recordings
 loupe replay checkout-flow --udid booted --width 438 --height 954
 ```
 
-They currently delegate low-level HID dispatch to AXe. Install AXe with
-`brew install cameroncooke/axe/axe`, or install Loupe through Homebrew so the
-formula pulls AXe in as a dependency. `loupe pinch` is intentionally not listed
-above because AXe does not support pinch yet.
+They currently delegate low-level HID dispatch to AXe. If dispatch fails, use
+`loupe doctor` and the project docs rather than adding setup commands to this
+skill. `loupe pinch` is intentionally not listed above because AXe does not
+support pinch yet.
 
 Failed actions automatically create a trace under `/tmp/loupe-traces`. Trace
 bundles include before/after snapshots, accessibility trees, logs, screenshots,
 an action record, and `target-crop.png` when a target frame was available.
 
 The product direction is runtime E2E through Loupe commands without requiring
-XCTest, `xcodebuild test`, or a UI test bundle as the public harness. The current
-legacy proof is:
-
-```bash
-Examples/LoupeExample/run-loupe-driven-ui-test.sh
-```
-
-That test fetches Loupe snapshots, resolves node frames, and uses
-`XCUICoordinate` for tap and drag actions. Treat it as evidence for coordinate
-resolution, not as the target action architecture.
+XCTest, `xcodebuild test`, or a UI test bundle as the public harness.
 
 ## Debugging
 
@@ -133,16 +117,6 @@ Run:
 
 ```bash
 loupe doctor
-```
-
-For Core unit coverage, prefer Swift Testing:
-
-```swift
-import Testing
-
-@Test func resolvesSelector() {
-    #expect(result.ref == "button")
-}
 ```
 
 If injection does not start the server:
@@ -165,17 +139,6 @@ Match design nodes to Loupe nodes by `testID` first, then role plus text, then
 geometry. Use Loupe view tree data for layout/style comparison and accessibility
 tree data only for movement/input selectors.
 
-## Install
-
-```bash
-loupe skills install
-loupe skills install --target codex
-loupe skills install --target claude
-```
-
-`skills install` upserts this skill into existing Codex or Claude Code skill
-folders and skips missing clients.
-
 ## Cleanup
 
 ```bash
@@ -186,3 +149,18 @@ loupe cleanup --recordings-older-than 30d
 
 Use `cleanup` to prune stale runtime records and old trace bundles. Recordings
 are preserved unless explicitly requested.
+
+## Runtime Mutation
+
+```bash
+loupe set --udid <UDID> --test-id example.components.label text "Runtime edited"
+loupe set --udid <UDID> --test-id example.design.card backgroundColor --color '#ff3366'
+loupe set --udid <UDID> --test-id example.design.card frame --rect 20,120,220,80
+loupe set --udid <UDID> --list
+loupe reflect /tmp/loupe-set.json --source ./Sources
+```
+
+Use `set` for developer-only UI iteration against the injected runtime. Prefer
+stable `testID` selectors; use `ref` only within the same observed screen.
+Use `reflect` after a verified mutation to summarize before/after state, confirm
+the target hierarchy, and find source lines containing the test ID.

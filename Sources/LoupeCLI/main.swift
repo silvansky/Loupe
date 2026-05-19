@@ -49,6 +49,8 @@ struct LoupeCLI {
             try await record(arguments)
         case "recordings":
             try await record(["list"] + arguments)
+        case "reflect":
+            try reflect(arguments)
         case "record-start":
             try await runtimeFetch(
                 arguments,
@@ -60,6 +62,10 @@ struct LoupeCLI {
             try await runtimeFetch(arguments, path: "/recording/stop", usage: "loupe record-stop [--host <url>] [--udid <sim>] [--output <path>]")
         case "runtime":
             try await runtimeFetch(arguments, path: "/runtime", usage: "loupe runtime [--host <url>] [--udid <sim>] [--output <path>]")
+        case "mutations":
+            try await runtimeFetch(arguments, path: "/mutations", usage: "loupe mutations [--host <url>] [--udid <sim>] [--output <path>]")
+        case "set", "mutate":
+            try await set(arguments)
         case "query":
             try query(arguments)
         case "launch":
@@ -656,6 +662,15 @@ struct LoupeCLI {
               query <snapshot.json> (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--tree view|accessibility]
                   Query a full snapshot view tree or derived accessibility tree.
 
+              set (--test-id <id> | --ref <ref>) <property> <value> [--udid <sim>]
+                  Mutate a supported UIKit view property through the injected runtime.
+
+              set --list | mutations [--host <url>] [--udid <sim>]
+                  List runtime-supported UIKit mutation properties and aliases.
+
+              reflect <mutation-response.json> --source <dir> [--output <path>]
+                  Summarize a runtime mutation with hierarchy context and source candidates.
+
               wait-for-visible (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--host <url>]
                   Poll /snapshot until a visible node matches.
 
@@ -738,6 +753,59 @@ struct LoupeCLI {
             throw CLIError("runtime fetch failed with HTTP \(httpResponse.statusCode)")
         }
         return data
+    }
+
+    private static func set(_ arguments: [String]) async throws {
+        if arguments.contains("--list") {
+            try await runtimeFetch(
+                arguments.filter { $0 != "--list" },
+                path: "/mutations",
+                usage: "loupe set --list [--host <url>] [--udid <sim>] [--output <path>]"
+            )
+            return
+        }
+
+        let options = try MutationSetOptions(arguments)
+        let host = try await resolvedRuntimeHost(
+            requestedHost: options.host,
+            hostWasExplicit: options.hostWasExplicit,
+            udid: options.udid
+        )
+        if let udid = options.udid {
+            try await validateRuntimeIdentity(host: host, expectedUDID: udid, timeout: options.timeout)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let body = try encoder.encode(options.request)
+        var request = URLRequest(url: host.appendingPathComponent("mutate"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = options.timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let (data, response) = try await httpData(for: request, timeout: options.timeout, label: "mutation")
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CLIError("mutation expected an HTTP response")
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = String(decoding: data, as: UTF8.self)
+            throw CLIError("mutation failed with HTTP \(httpResponse.statusCode): \(body)")
+        }
+        try write(data: data, outputURL: options.outputURL)
+    }
+
+    private static func reflect(_ arguments: [String]) throws {
+        let options = try MutationReflectOptions(arguments)
+        let data = try Data(contentsOf: options.mutationURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let response = try decoder.decode(LoupeMutationResponse.self, from: data)
+        let reflection = mutationReflection(response, sourceRoot: options.sourceRoot)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try write(data: try encoder.encode(reflection), outputURL: options.outputURL)
     }
 
     private static func runtimes(_ arguments: [String]) async throws {
@@ -1920,10 +1988,20 @@ struct LoupeCLI {
     ) async throws -> (Data, URLResponse) {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
+        return try await httpData(for: request, timeout: timeout, label: label)
+    }
+
+    private static func httpData(
+        for request: URLRequest,
+        timeout: TimeInterval,
+        label: String
+    ) async throws -> (Data, URLResponse) {
+        var request = request
+        request.timeoutInterval = timeout
         do {
             return try await URLSession.shared.data(for: request)
         } catch {
-            throw CLIError("\(label) timed out or failed for \(url.absoluteString): \(error.localizedDescription)")
+            throw CLIError("\(label) timed out or failed for \(request.url?.absoluteString ?? "unknown-url"): \(error.localizedDescription)")
         }
     }
 
@@ -2427,6 +2505,131 @@ struct LoupeCLI {
             return string == expected
         }
         return String(describing: value) == expected
+    }
+
+    private static func mutationReflection(
+        _ response: LoupeMutationResponse,
+        sourceRoot: URL
+    ) -> LoupeMutationReflection {
+        let testID = response.after.testID ?? response.target.testID ?? mutationSelectorTestID(response.selector)
+        let hierarchy = response.hierarchy ?? mutationHierarchyContext(response)
+        let candidates = testID.map {
+            sourceCandidates(matching: $0, under: sourceRoot)
+        } ?? []
+        return LoupeMutationReflection(
+            selector: response.selector,
+            property: response.property,
+            value: response.value,
+            targetType: response.after.uiKit?.className ?? response.after.typeName,
+            testID: testID,
+            before: mutationNodeSummary(response.before),
+            after: mutationNodeSummary(response.after),
+            targetMatchesHierarchy: targetMatchesHierarchy(response: response, hierarchy: hierarchy),
+            hierarchy: hierarchy,
+            sourceCandidates: candidates
+        )
+    }
+
+    private static func mutationSelectorTestID(_ selector: LoupeMutationSelector) -> String? {
+        selector.kind == .testID ? selector.value : nil
+    }
+
+    private static func sourceCandidates(matching testID: String, under sourceRoot: URL) -> [LoupeMutationSourceCandidate] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: sourceRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        var candidates: [LoupeMutationSourceCandidate] = []
+        for case let url as URL in enumerator {
+            guard isSearchableSource(url),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true,
+                  let text = try? String(contentsOf: url, encoding: .utf8) else {
+                continue
+            }
+            for (offset, line) in text.components(separatedBy: .newlines).enumerated()
+                where line.contains(testID) {
+                candidates.append(
+                    LoupeMutationSourceCandidate(
+                        path: url.path,
+                        line: offset + 1,
+                        text: line.trimmingCharacters(in: .whitespaces)
+                    )
+                )
+            }
+        }
+
+        return candidates.sorted {
+            if $0.path != $1.path { return $0.path < $1.path }
+            return $0.line < $1.line
+        }
+    }
+
+    private static func isSearchableSource(_ url: URL) -> Bool {
+        ["swift", "m", "mm", "h", "xib", "storyboard"].contains(url.pathExtension)
+    }
+
+    private static func mutationHierarchyContext(_ response: LoupeMutationResponse) -> LoupeMutationHierarchyContext {
+        LoupeMutationHierarchyContext(
+            target: mutationNodeSummary(response.after),
+            parent: response.after.parentRef.map {
+                LoupeMutationNodeSummary(ref: $0, typeName: "unknown")
+            },
+            siblings: [],
+            children: response.after.children.map {
+                LoupeMutationNodeSummary(ref: $0, typeName: "unknown")
+            }
+        )
+    }
+
+    private static func targetMatchesHierarchy(
+        response: LoupeMutationResponse,
+        hierarchy: LoupeMutationHierarchyContext
+    ) -> Bool {
+        guard hierarchy.target.ref == response.after.ref else {
+            return false
+        }
+
+        switch response.selector.kind {
+        case .testID:
+            return hierarchy.target.testID == response.selector.value
+        case .ref:
+            return hierarchy.target.ref == response.selector.value
+        case .role:
+            return hierarchy.target.role == response.selector.value
+        case .text:
+            guard let text = hierarchy.target.text else {
+                return false
+            }
+            if response.selector.exact {
+                return text == response.selector.value
+            }
+            return text.localizedCaseInsensitiveContains(response.selector.value)
+        case .roleAndText:
+            guard hierarchy.target.role == response.selector.role,
+                  let text = hierarchy.target.text else {
+                return false
+            }
+            if response.selector.exact {
+                return text == response.selector.value
+            }
+            return text.localizedCaseInsensitiveContains(response.selector.value)
+        }
+    }
+
+    private static func mutationNodeSummary(_ node: LoupeNode) -> LoupeMutationNodeSummary {
+        LoupeMutationNodeSummary(
+            ref: node.ref,
+            typeName: node.uiKit?.className ?? node.typeName,
+            role: node.role,
+            testID: node.testID,
+            text: displayText(node),
+            frame: node.frame
+        )
     }
 
     private static func loadRuntimeHostRecords() throws -> [LoupeRuntimeHostRecord] {
@@ -3698,6 +3901,319 @@ private struct ReplayOptions {
             .map { allowed.contains($0) ? Character($0) : "-" }
             .map(String.init)
             .joined()
+    }
+}
+
+private struct MutationSetOptions {
+    var host: URL
+    var hostWasExplicit: Bool
+    var udid: String?
+    var timeout: TimeInterval
+    var outputURL: URL?
+    var request: LoupeMutationRequest
+
+    init(_ arguments: [String]) throws {
+        host = URL(string: "http://127.0.0.1:8765")!
+        hostWasExplicit = false
+        udid = nil
+        timeout = 5
+        outputURL = nil
+
+        var selector: LoupeMutationSelector?
+        var property: String?
+        var rawValue: String?
+        var valueType = "auto"
+        var layout = true
+        var positionals: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--host":
+                host = try Self.url(after: "--host", in: arguments, index: &index)
+                hostWasExplicit = true
+            case "--udid", "--device":
+                udid = try Self.value(after: arguments[index], in: arguments, index: &index)
+            case "--timeout":
+                timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
+            case "--output":
+                outputURL = URL(fileURLWithPath: try Self.value(after: "--output", in: arguments, index: &index))
+            case "--test-id", "--testID":
+                selector = LoupeMutationSelector(kind: .testID, value: try Self.value(after: arguments[index], in: arguments, index: &index))
+            case "--ref":
+                selector = LoupeMutationSelector(kind: .ref, value: try Self.value(after: "--ref", in: arguments, index: &index))
+            case "--role":
+                selector = LoupeMutationSelector(kind: .role, value: try Self.value(after: "--role", in: arguments, index: &index))
+            case "--text":
+                selector = LoupeMutationSelector(kind: .text, value: try Self.value(after: "--text", in: arguments, index: &index), exact: false)
+            case "--property", "--key":
+                property = try Self.value(after: arguments[index], in: arguments, index: &index)
+            case "--value":
+                rawValue = try Self.value(after: "--value", in: arguments, index: &index)
+            case "--type":
+                valueType = try Self.value(after: "--type", in: arguments, index: &index)
+            case "--bool":
+                valueType = "bool"
+                rawValue = try Self.value(after: "--bool", in: arguments, index: &index)
+            case "--number":
+                valueType = "number"
+                rawValue = try Self.value(after: "--number", in: arguments, index: &index)
+            case "--string":
+                valueType = "string"
+                rawValue = try Self.value(after: "--string", in: arguments, index: &index)
+            case "--color":
+                valueType = "color"
+                rawValue = try Self.value(after: "--color", in: arguments, index: &index)
+            case "--rect":
+                valueType = "rect"
+                rawValue = try Self.value(after: "--rect", in: arguments, index: &index)
+            case "--point":
+                valueType = "point"
+                rawValue = try Self.value(after: "--point", in: arguments, index: &index)
+            case "--size":
+                valueType = "size"
+                rawValue = try Self.value(after: "--size", in: arguments, index: &index)
+            case "--no-layout":
+                layout = false
+            case "--help", "-h":
+                throw CLIError(Self.usage)
+            default:
+                if arguments[index].hasPrefix("--") {
+                    throw CLIError("Unknown set option: \(arguments[index])")
+                }
+                positionals.append(arguments[index])
+            }
+            index += 1
+        }
+
+        if property == nil, !positionals.isEmpty {
+            property = positionals.removeFirst()
+        }
+        if rawValue == nil, !positionals.isEmpty {
+            rawValue = positionals.removeFirst()
+        }
+        guard positionals.isEmpty else {
+            throw CLIError("Unexpected set arguments: \(positionals.joined(separator: " "))")
+        }
+        guard let selector else {
+            throw CLIError("set requires --test-id, --ref, --role, or --text")
+        }
+        guard let property, !property.isEmpty else {
+            throw CLIError("set requires <property> or --property <property>")
+        }
+        guard let rawValue else {
+            throw CLIError("set requires <value> or --value <value>")
+        }
+        guard timeout > 0 else {
+            throw CLIError("--timeout must be greater than 0")
+        }
+
+        let value = try Self.mutationValue(rawValue, type: valueType, property: property)
+        request = LoupeMutationRequest(selector: selector, property: property, value: value, layout: layout)
+    }
+
+    static let usage = """
+    Usage: loupe set (--test-id <id> | --ref <ref>) <property> <value> [--udid <sim>]
+           loupe set --test-id card.title text "New title"
+           loupe set --test-id card backgroundColor --color '#ff3366'
+           loupe set --test-id card frame --rect 20,120,220,80
+    """
+
+    private static func mutationValue(_ rawValue: String, type: String, property: String) throws -> LoupeMutationValue {
+        switch type.lowercased() {
+        case "auto":
+            return try inferredMutationValue(rawValue, property: property)
+        case "bool":
+            return .bool(try bool(rawValue))
+        case "int":
+            guard let value = Int(rawValue) else { throw CLIError("Expected integer value: \(rawValue)") }
+            return .int(value)
+        case "number", "double":
+            guard let value = Double(rawValue) else { throw CLIError("Expected numeric value: \(rawValue)") }
+            return value.rounded() == value ? .int(Int(value)) : .double(value)
+        case "string":
+            return .string(rawValue)
+        case "color":
+            return .color(try color(rawValue))
+        case "rect":
+            return .rect(try rect(rawValue))
+        case "point":
+            return .point(try point(rawValue))
+        case "size":
+            return .size(try size(rawValue))
+        default:
+            throw CLIError("Unknown set value type: \(type)")
+        }
+    }
+
+    private static func inferredMutationValue(_ rawValue: String, property: String) throws -> LoupeMutationValue {
+        let normalized = property.lowercased()
+        if normalized.contains("color") || rawValue.hasPrefix("#") {
+            return .color(try color(rawValue))
+        }
+        if normalized == "frame" || normalized == "bounds" {
+            return .rect(try rect(rawValue))
+        }
+        if normalized == "center" || normalized.hasSuffix(".center") || normalized.hasSuffix("point") {
+            return .point(try point(rawValue))
+        }
+        if normalized.contains("offset") || normalized.hasSuffix("size") {
+            return .size(try size(rawValue))
+        }
+        if ["true", "false", "yes", "no", "0", "1"].contains(rawValue.lowercased()),
+           normalized.contains("hidden")
+            || normalized.contains("enabled")
+            || normalized.contains("opaque")
+            || normalized.contains("clip")
+            || normalized.contains("ison")
+            || normalized.contains("iselement") {
+            return .bool(try bool(rawValue))
+        }
+        if let int = Int(rawValue) {
+            return .int(int)
+        }
+        if let double = Double(rawValue), double.isFinite {
+            return .double(double)
+        }
+        return .string(rawValue)
+    }
+
+    private static func bool(_ rawValue: String) throws -> Bool {
+        if ["true", "yes", "1"].contains(rawValue.lowercased()) { return true }
+        if ["false", "no", "0"].contains(rawValue.lowercased()) { return false }
+        throw CLIError("Expected boolean value: \(rawValue)")
+    }
+
+    private static func color(_ rawValue: String) throws -> LoupeColor {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("#") {
+            let hex = String(trimmed.dropFirst())
+            let expanded: String
+            if hex.count == 3 {
+                expanded = hex.map { "\($0)\($0)" }.joined()
+            } else {
+                expanded = hex
+            }
+            guard expanded.count == 6 || expanded.count == 8, let raw = UInt64(expanded, radix: 16) else {
+                throw CLIError("Expected color as #RGB, #RRGGBB, #RRGGBBAA, or r,g,b[,a]")
+            }
+            let hasAlpha = expanded.count == 8
+            let red = Double((raw >> (hasAlpha ? 24 : 16)) & 0xff) / 255
+            let green = Double((raw >> (hasAlpha ? 16 : 8)) & 0xff) / 255
+            let blue = Double((raw >> (hasAlpha ? 8 : 0)) & 0xff) / 255
+            let alpha = hasAlpha ? Double(raw & 0xff) / 255 : 1
+            return LoupeColor(red: red, green: green, blue: blue, alpha: alpha)
+        }
+
+        let values = try doubles(rawValue, expected: [3, 4], label: "color")
+        let divisor: Double = values.prefix(3).contains { $0 > 1 } ? 255 : 1
+        return LoupeColor(
+            red: values[0] / divisor,
+            green: values[1] / divisor,
+            blue: values[2] / divisor,
+            alpha: values.count == 4 ? values[3] : 1
+        )
+    }
+
+    private static func rect(_ rawValue: String) throws -> LoupeRect {
+        let values = try doubles(rawValue, expected: [4], label: "rect")
+        return LoupeRect(x: values[0], y: values[1], width: values[2], height: values[3])
+    }
+
+    private static func point(_ rawValue: String) throws -> LoupePoint {
+        let values = try doubles(rawValue, expected: [2], label: "point")
+        return LoupePoint(x: values[0], y: values[1])
+    }
+
+    private static func size(_ rawValue: String) throws -> LoupeSize {
+        let values = try doubles(rawValue, expected: [2], label: "size")
+        return LoupeSize(width: values[0], height: values[1])
+    }
+
+    private static func doubles(_ rawValue: String, expected: [Int], label: String) throws -> [Double] {
+        let values = rawValue
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard expected.contains(values.count) else {
+            throw CLIError("Expected \(label) with \(expected.map(String.init).joined(separator: " or ")) comma-separated numbers")
+        }
+        return try values.map { value in
+            guard let double = Double(value), double.isFinite else {
+                throw CLIError("Invalid \(label) number: \(value)")
+            }
+            return double
+        }
+    }
+
+    private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
+        let valueIndex = index + 1
+        guard valueIndex < arguments.count else {
+            throw CLIError("\(option) requires a value")
+        }
+        index = valueIndex
+        return arguments[valueIndex]
+    }
+
+    private static func double(after option: String, in arguments: [String], index: inout Int) throws -> Double {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let value = Double(raw) else {
+            throw CLIError("\(option) expects a number")
+        }
+        return value
+    }
+
+    private static func url(after option: String, in arguments: [String], index: inout Int) throws -> URL {
+        let raw = try value(after: option, in: arguments, index: &index)
+        guard let url = URL(string: raw) else {
+            throw CLIError("Invalid URL for \(option): \(raw)")
+        }
+        return url
+    }
+}
+
+private struct MutationReflectOptions {
+    var mutationURL: URL
+    var sourceRoot: URL
+    var outputURL: URL?
+
+    init(_ arguments: [String]) throws {
+        guard let first = arguments.first, !first.hasPrefix("--") else {
+            throw CLIError("Usage: loupe reflect <mutation-response.json> --source <dir> [--output <path>]")
+        }
+
+        mutationURL = URL(fileURLWithPath: first)
+        sourceRoot = URL(fileURLWithPath: ".")
+        outputURL = nil
+        var resolvedSourceRoot: URL?
+        var index = 1
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--source", "--source-root":
+                resolvedSourceRoot = URL(fileURLWithPath: try Self.value(after: arguments[index], in: arguments, index: &index))
+            case "--output":
+                outputURL = URL(fileURLWithPath: try Self.value(after: "--output", in: arguments, index: &index))
+            case "--help", "-h":
+                throw CLIError("Usage: loupe reflect <mutation-response.json> --source <dir> [--output <path>]")
+            default:
+                throw CLIError("Unknown reflect option: \(arguments[index])")
+            }
+            index += 1
+        }
+
+        guard let resolvedSourceRoot else {
+            throw CLIError("reflect requires --source <dir>")
+        }
+        sourceRoot = resolvedSourceRoot
+    }
+
+    private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {
+        let valueIndex = index + 1
+        guard valueIndex < arguments.count else {
+            throw CLIError("\(option) requires a value")
+        }
+        index = valueIndex
+        return arguments[valueIndex]
     }
 }
 

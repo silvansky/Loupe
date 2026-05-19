@@ -29,6 +29,7 @@ LoupeKit
   - captures UIWindowScene/UIWindow/UIView tree
   - captures structured UIKit and accessibility properties
   - exposes full node inspection and basic layout audit endpoints
+  - exposes allowlisted runtime UIKit property mutation
   - exposes custom metadata
   - exposes runtime logs and touch recording
   - serves snapshots over localhost transport
@@ -106,6 +107,48 @@ Implemented on-demand detail tools:
 - `inspect(ref/testID/text/role)` for the full node plus parent, siblings, and
   children summaries
 - `audit(snapshot)` for sibling overlap and child-outside-parent issues
+
+## Runtime Mutation
+
+Loupe follows Lookin's high-level idea of resolving a runtime object and
+applying a typed property update on the app main thread, but does not expose
+arbitrary Objective-C selectors. The public shape is:
+
+```bash
+loupe set --test-id checkout.title text "New title"
+loupe set --test-id checkout.card backgroundColor --color '#ff3366'
+loupe set --test-id checkout.card frame --rect 20,120,220,80
+loupe set --list
+```
+
+The injected server handles `POST /mutate` with a selector, property path, and
+typed value. Supported properties are intentionally allowlisted: frame/bounds,
+alpha, hidden, background/text/border colors, corner radius, accessibility
+strings, label/button/text field text, font size, text alignment, and common
+control values.
+
+Mutation support is registry-based, not a single hard-coded switch. New UIKit
+coverage should be added as a descriptor group in `LoupeAgent`: view, layer,
+accessibility, text, control, scroll, stack, or another UIKit-family group. The
+runtime `/mutations` endpoint and `loupe set --list` expose the active registry
+so agents can discover support before editing a screen.
+
+## Runtime Edit To Code Loop
+
+The intended developer loop is:
+
+```bash
+loupe tree --udid <UDID> --view --depth 3
+loupe set --udid <UDID> --test-id checkout.title text "Runtime title" --output /tmp/loupe-set.json
+loupe fetch http://127.0.0.1:<port>/snapshot --output /tmp/loupe-after.json
+loupe inspect /tmp/loupe-after.json --test-id checkout.title
+loupe reflect /tmp/loupe-set.json --source ./Sources --output /tmp/loupe-reflect.json
+```
+
+`reflect` is advisory. It does not edit source files by itself; it returns
+before/after summaries, target hierarchy context, and candidate files/lines
+containing the stable test ID. The agent or developer then decides the smallest
+matching source change and reruns Loupe verification.
 
 ## Validation Types
 

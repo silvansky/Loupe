@@ -88,13 +88,11 @@ public final class LoupeServer: @unchecked Sendable {
             Darwin.close(clientFD)
         }
 
-        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
-        let bytesRead = Darwin.read(clientFD, &buffer, buffer.count)
-        guard bytesRead > 0 else {
+        guard let requestData = readHTTPRequest(from: clientFD) else {
             return
         }
 
-        let request = HTTPRequest(data: Data(buffer.prefix(Int(bytesRead))))
+        let request = HTTPRequest(data: requestData)
         let payload = responsePayload(for: request)
         let responseText = """
         HTTP/1.1 \(payload.status) \(reasonPhrase(for: payload.status))\r
@@ -105,6 +103,41 @@ public final class LoupeServer: @unchecked Sendable {
         \(payload.body)
         """
         write(Data(responseText.utf8), to: clientFD)
+    }
+
+    private func readHTTPRequest(from clientFD: Int32) -> Data? {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+
+        while true {
+            let bytesRead = Darwin.read(clientFD, &buffer, buffer.count)
+            guard bytesRead > 0 else {
+                return data.isEmpty ? nil : data
+            }
+            data.append(buffer, count: Int(bytesRead))
+
+            guard let headerEnd = data.range(of: Data("\r\n\r\n".utf8)) else {
+                continue
+            }
+
+            let headerText = String(decoding: data[..<headerEnd.lowerBound], as: UTF8.self)
+            let contentLength = contentLength(from: headerText)
+            let bodyStart = headerEnd.upperBound
+            if data.count >= bodyStart + contentLength {
+                return data
+            }
+        }
+    }
+
+    private func contentLength(from headerText: String) -> Int {
+        for line in headerText.split(separator: "\r\n") {
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let key = line[..<separator].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard key == "content-length" else { continue }
+            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return Int(value) ?? 0
+        }
+        return 0
     }
 
     private func responsePayload(for request: HTTPRequest) -> ResponsePayload {
@@ -229,6 +262,27 @@ public final class LoupeServer: @unchecked Sendable {
             } catch {
                 return ResponsePayload(status: 500, body: errorBody("observation_encoding_failed", error: error))
             }
+        case "/mutations":
+            do {
+                let data = try makeLoupeJSONEncoder().encode(LoupeAgent().mutationCapabilities())
+                return ResponsePayload(status: 200, body: String(decoding: data, as: UTF8.self))
+            } catch {
+                return ResponsePayload(status: 500, body: errorBody("mutations_encoding_failed", error: error))
+            }
+        case "/mutate":
+            guard request.method == "POST" else {
+                return ResponsePayload(status: 405, body: #"{"error":"method_not_allowed"}"#)
+            }
+            do {
+                let mutation = try JSONDecoder().decode(LoupeMutationRequest.self, from: request.body)
+                let response = try LoupeAgent().mutate(mutation)
+                let data = try makeLoupeJSONEncoder().encode(response)
+                return ResponsePayload(status: 200, body: String(decoding: data, as: UTF8.self))
+            } catch let error as LoupeMutationError {
+                return ResponsePayload(status: error.status, body: errorBody(error.code, message: error.message))
+            } catch {
+                return ResponsePayload(status: 400, body: errorBody("mutation_failed", error: error))
+            }
         default:
             return ResponsePayload(status: 404, body: #"{"error":"not_found"}"#)
         }
@@ -261,6 +315,10 @@ public final class LoupeServer: @unchecked Sendable {
         switch status {
         case 200:
             return "OK"
+        case 400:
+            return "Bad Request"
+        case 405:
+            return "Method Not Allowed"
         case 404:
             return "Not Found"
         case 500:
@@ -276,6 +334,14 @@ public final class LoupeServer: @unchecked Sendable {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
         return #"{"error":""# + code + #"","message":""# + message + #""}"#
+    }
+
+    private func errorBody(_ code: String, message: String) -> String {
+        let escaped = message
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return #"{"error":""# + code + #"","message":""# + escaped + #""}"#
     }
 
     private func selector(from queryItems: [String: String]) -> LoupeSelector? {
@@ -314,12 +380,22 @@ private struct HTTPRequest: Sendable {
     var method: String
     var path: String
     var queryItems: [String: String]
+    var body: Data
 
     init(data: Data) {
         let text = String(decoding: data, as: UTF8.self)
-        let requestLine = text
-            .split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: false)
-            .first ?? ""
+        let headerEnd = data.range(of: Data("\r\n\r\n".utf8))
+        let headerText: String
+        if let headerEnd {
+            headerText = String(decoding: data[..<headerEnd.lowerBound], as: UTF8.self)
+            body = Data(data[headerEnd.upperBound...])
+        } else {
+            headerText = text
+            body = Data()
+        }
+
+        let headerLines = headerText.split(separator: "\r\n", omittingEmptySubsequences: false)
+        let requestLine = headerLines.first ?? ""
         let parts = requestLine.split(separator: " ")
         method = parts.indices.contains(0) ? String(parts[0]) : "GET"
         let rawPath = parts.indices.contains(1) ? String(parts[1]) : "/"
@@ -338,6 +414,18 @@ private struct HTTPRequest: Sendable {
                 path = String(path[..<queryIndex])
             }
         }
+    }
+}
+
+public struct LoupeMutationError: Error, Equatable {
+    var status: Int
+    var code: String
+    var message: String
+
+    init(status: Int = 400, code: String, message: String) {
+        self.status = status
+        self.code = code
+        self.message = message
     }
 }
 

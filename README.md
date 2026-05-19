@@ -67,6 +67,23 @@ Failed actions automatically write traces under the system temporary
 `loupe-traces` directory. Successful traced actions include `target-crop.png`
 when Loupe resolved a framed target.
 
+## Mutate
+
+```bash
+loupe tree --udid <UDID> --view --depth 3
+loupe set --udid <UDID> --test-id checkout.title text "Runtime title" --output mutation.json
+loupe inspect snapshot.json --test-id checkout.title
+loupe reflect mutation.json --source ./Sources
+loupe set --udid <UDID> --test-id checkout.card backgroundColor --color '#ff3366'
+loupe set --udid <UDID> --test-id checkout.card frame --rect 20,120,220,80
+loupe set --udid <UDID> --list
+```
+
+`set` updates allowlisted UIKit properties inside the injected app process.
+`reflect` turns a mutation response into before/after summaries, hierarchy
+context, and source candidates so an agent can decide the smallest matching code
+change.
+
 ## Record
 
 ```bash

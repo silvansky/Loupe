@@ -61,6 +61,18 @@ harness.
   days; recordings are only pruned with `--recordings-older-than`.
 - Runtime registry:
   `loupe runtimes` / `loupe apps` lists known simulator hosts and live state.
+- Runtime mutation:
+  `loupe set --test-id <id> <property> <value>` posts a typed mutation to the
+  injected server and verifies the after snapshot reflects the allowlisted
+  UIKit property change.
+- Runtime mutation discovery:
+  `loupe set --list` / `/mutations` exposes the active mutation property
+  registry for agent planning.
+- Runtime edit-to-code loop:
+  `loupe set --output <mutation.json>`, `loupe inspect`, then
+  `loupe reflect <mutation.json> --source <dir>` verifies a runtime edit and
+  produces before/after summaries, hierarchy context, and source candidates for
+  an agent-led code application step.
 - Runtime identity handshake:
   `loupe runtime --udid <sim>` verifies that the contacted Loupe host belongs to
   the expected simulator before recorder commands use it.
