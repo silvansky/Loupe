@@ -1,14 +1,18 @@
+<p align="left">
+  <img src="Docs/Assets/loupe-logo.svg" alt="Loupe" width="80">
+</p> 
+
 # Loupe
-
-<p align="center">
-  <img src="Docs/Assets/loupe-logo.svg" alt="Loupe" width="160">
-</p>
-
 Runtime E2E inspection and action harness for iOS Simulator apps.
 
 Loupe starts a small HTTP server inside the simulator app process, captures
 UIKit and accessibility state on demand, and dispatches simulator input through
 its native HID backend.
+
+## Demo
+https://github.com/user-attachments/assets/52471c43-ec43-4654-9477-b06413660734
+
+
 
 ## Install
 
