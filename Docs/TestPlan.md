@@ -117,9 +117,10 @@ does not count as evidence that the CLI or skill improved agent performance.
   `loupe runtimes` / `loupe apps` lists known simulator hosts and live state.
 - Runtime mutation:
   `loupe set --test-id <id> <property> <value>` posts a typed mutation to the
-  injected server and verifies the after snapshot reflects the allowlisted
-  UIKit property change. Property mutations animate by default, and
-  `--no-animate` verifies the immediate path.
+  injected server and reports whether the after snapshot reflects the
+  allowlisted UIKit property change. Property mutations animate by default, and
+  `--no-animate` verifies the immediate path. Layout-owned values may be
+  restored by UIKit and must be judged by the effective state.
 - Runtime mutation discovery:
   `loupe set --list` / `/mutations` exposes the active mutation property
   registry for agent planning.
@@ -183,15 +184,6 @@ does not count as evidence that the CLI or skill improved agent performance.
 - SwiftUI movement/input selectors are intentionally limited to elements exposed
   through the accessibility tree. Loupe does not synthesize selectors from
   private SwiftUI view-tree implementation details.
-
-## Reference Projects To Mine
-
-- idb and SimulatorKit HID references: lower-level simulator/device control and
-  HID primitives.
-- XcodeBuildMCP: agent-friendly Xcode, simulator lifecycle, logging, and UI
-  automation workflows.
-- WebDriverAgent/Appium XCUITest driver: long-running HTTP action runner model,
-  selector semantics, and device compatibility lessons.
-- Maestro and Detox: flow DSL, retry/wait ergonomics, and mobile-specific
-  flake handling patterns.
-- idb-based tools: lower-level simulator/device control and HID primitives.
+- Runtime mutation is strongest for text, color, visibility, layer styling, and
+  control values. Frame and constraint edits are diagnostic unless the effective
+  state confirms UIKit kept them.

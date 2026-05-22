@@ -1,48 +1,71 @@
 # Homebrew Distribution
 
-Loupe should be distributed as a Homebrew tap formula.
+Loupe is distributed from this repository as a Homebrew tap formula.
 
-## User Install
+## Install
 
 ```bash
 brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
 brew install loupe
 ```
 
-`loupe` does not require a separate simulator action CLI. The Homebrew formula
-builds the Loupe CLI and injector; runtime actions use Loupe's native HID
-backend.
+The formula builds and installs:
 
-## Tap Layout
+- `bin/loupe`
+- `libexec/LoupeInjector.framework/LoupeInjector`
+- `share/loupe/skills/loupe`
 
-The current repository can be tapped directly with an explicit URL. If we later
-want the shorter `brew tap heoblitz/loupe` command, publish the same formula in
-the conventional tap repository:
+Loupe does not require a separate simulator action CLI; runtime actions use the
+native HID backend packaged with `loupe`.
+
+## Formula Source
+
+The canonical formula is:
 
 ```text
-heoblitz/homebrew-loupe
-└── Formula
-    └── loupe.rb
+Formula/loupe.rb
 ```
 
-The canonical formula source in this repo is `Formula/loupe.rb`.
+The current repository can be tapped directly with the explicit URL above. A
+separate `heoblitz/homebrew-loupe` tap is optional if a shorter tap command is
+needed later.
 
 ## Release Checklist
 
-1. Make the source archive public and immutable.
-2. Tag the release, for example `v0.1.0`.
-3. Replace the formula `sha256` with the release archive checksum.
-4. Run:
+1. Run the post-change harness:
 
 ```bash
-brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
+scripts/verify-agent-work.sh
+```
+
+2. Commit changes and tag the release:
+
+```bash
+git tag vX.Y.Z
+git push origin main vX.Y.Z
+```
+
+3. Download the tag archive and update `Formula/loupe.rb`:
+
+```bash
+curl -L -o /tmp/loupe-vX.Y.Z.tar.gz \
+  https://github.com/heoblitz/Loupe/archive/refs/tags/vX.Y.Z.tar.gz
+shasum -a 256 /tmp/loupe-vX.Y.Z.tar.gz
+```
+
+4. Commit and push the formula update.
+
+5. Verify the public tap path:
+
+```bash
+brew update
 brew audit --strict --online heoblitz/loupe/loupe
-brew install --build-from-source heoblitz/loupe/loupe
+brew reinstall --build-from-source heoblitz/loupe/loupe
 brew test heoblitz/loupe/loupe
+loupe doctor
+loupe injector-path
 ```
 
 ## Current Status
 
-`v0.1.2` is public and the formula checksum is set. The formula has been
-build-verified with a local archive; run the tap install command above after
-pushing formula changes to verify the public tap path end to end.
+The stable formula currently points at `v0.1.2`.

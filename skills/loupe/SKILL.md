@@ -5,127 +5,65 @@ description: Use this skill when working with iOS Simulator UI automation, Loupe
 
 # Loupe
 
-Use this skill when working with iOS Simulator UI automation, view-tree inspection, compact screen context, or Loupe injection.
+Use Loupe for iOS Simulator runtime observation, UI actions, optional mutation
+experiments, and design-quality feedback. Keep full snapshots on disk; send
+compact reports, trees, maps, and targeted `inspect` output to agents.
 
-## Runtime Assumptions
+## Rules
 
-Use the installed `loupe` command. Do not hard-code DerivedData injector paths;
-resolve the injector through Loupe when the path matters:
+- Use the installed `loupe`; resolve injector paths with `loupe injector-path`.
+- Loupe runs through the injected app server; no separate host daemon is needed.
+- Use accessibility for text discovery and action targets. Use the view tree for
+  layout, style, UIKit properties, mutation refs, and design checks.
+- Use Loupe CLI actions for runtime E2E. Do not make XCTest or a UI test bundle
+  the public harness.
+- Public actions are `tap`, `swipe`, `drag`, and `type`. Avoid tap-by-text as a
+  main interface; prefer `testID`, `ref`, or coordinates. `pinch` is not
+  implemented.
 
-```bash
-loupe injector-path
-```
+## Start Or Select Runtime
 
-## Build And Inject Workflow
-
-For an app that has already been built, place and launch it on the simulator
-through Loupe:
+For a built app:
 
 ```bash
 xcrun simctl install booted /path/to/App.app
 loupe start --bundle-id com.example.App
 ```
 
-`loupe start` resolves the configured injector path, launches the app with
-injection, and waits for the in-app Loupe server. It is a wrapper around
-`loupe launch --inject`; Loupe does not need a separate host-side server.
-
-If a nonstandard injector is needed, use:
-
-```bash
-loupe launch --bundle-id com.example.App --dylib /absolute/path/LoupeInjector.framework/LoupeInjector
-```
-
-## Observation
-
-After launch, fetch context from the in-app Loupe server:
-
-```bash
-loupe current
-loupe capture-report --bundle-id com.example.App --output /tmp/loupe-report
-loupe tree --bundle-id com.example.App --accessibility --depth 3
-loupe fetch <runtime-host>/observation
-loupe fetch <runtime-host>/snapshot --output /tmp/loupe-snapshot.json
-loupe query /tmp/loupe-snapshot.json --test-id checkout.payButton
-loupe accessibility /tmp/loupe-snapshot.json
-loupe query /tmp/loupe-snapshot.json --tree accessibility --test-id checkout.payButton
-loupe inspect /tmp/loupe-snapshot.json --test-id checkout.payButton
-loupe screen-map /tmp/loupe-snapshot.json --limit 80
-loupe paint-stack /tmp/loupe-snapshot.json --point 201,319
-loupe subtree /tmp/loupe-snapshot.json --test-id checkout.form --depth 3
-loupe audit /tmp/loupe-snapshot.json
-loupe wait-for-visible --test-id checkout.payButton --timeout 5 --output /tmp/loupe-visible.json
-```
-
-Use `capture-report` for design iteration when screenshots matter. It stores a
-screenshot beside snapshot, screen-map, accessibility, compact, audit, runtime,
-and summary artifacts, so visual review and DOM-like runtime checks stay paired.
-Use compact observation for quick LLM context. Use `screen-map` when a design
-or screenshot needs structural verification: it keeps visible semantic and
-styled elements with text, role, frame, style, UIKit class, and parent refs.
-Use `paint-stack` when a visual change appears hidden or ineffective; it shows
-the visible nodes at a point in top-to-bottom paint order, which helps choose
-the real paint target instead of a covered container.
-Keep full snapshots in files, query the view tree by `testID`, text, role, or
-ref for UI verification, and use `inspect` only when the full node, UIKit-
-specific fields, or parent/sibling/child context is needed.
-
-Use the accessibility tree for movement and input. Selector-based actions
-already resolve there first, then fall back to the view tree only if no
-accessibility match exists.
-
-## Agent Routine
-
-When using Loupe as an agent skill, follow this order:
+When multiple apps are injected, select the runtime before probing. For `use`,
+only call `loupe use <bundle-id>` or `loupe use --host <runtime-host>`. Put
+`--bundle-id`, `--udid`, and `--host` on observation/action commands when you
+need an explicit target. Do not keep retrying the default host after
+`loupe runtimes` shows another host.
 
 ```bash
 loupe runtimes
 loupe use com.example.App
+loupe use --host <runtime-host>
 loupe current
-loupe tree --udid booted --accessibility --depth 3
-loupe tree --udid booted --view --depth 3
-loupe tree --bundle-id com.example.App --interesting
-loupe tree --bundle-id com.example.App --text --accessibility
-loupe current
-loupe capture-report --bundle-id com.example.App --output /tmp/loupe-report
-loupe fetch <runtime-host>/snapshot --output /tmp/loupe-snapshot.json
-loupe screen-map /tmp/loupe-snapshot.json --limit 80
-loupe paint-stack /tmp/loupe-snapshot.json --ref n21
-loupe inspect /tmp/loupe-snapshot.json --test-id target.id
-loupe mutations --ref n21
-loupe tap --test-id target.id --udid booted --trace-dir /tmp/loupe-trace --expect-visible next.id
-loupe trace-summary /tmp/loupe-trace
-loupe diff /tmp/loupe-trace/before-snapshot.json /tmp/loupe-trace/after-snapshot.json --changed-only
-loupe audit /tmp/loupe-trace/after-snapshot.json
-loupe compare-design /tmp/loupe-trace/after-snapshot.json figma-export.json
-loupe set --list
-loupe set --test-id example.design.card backgroundColor --color '#ff3366' --output /tmp/loupe-set.json
-loupe wait-for-value --test-id example.design.card --key style.backgroundColor.red --equals 1 --output /tmp/loupe-wait.json
-loupe reflect /tmp/loupe-set.json --source ./Sources
-loupe cleanup --dry-run
 ```
 
-The skill path should keep model context small: use `tree` and `compact` first,
-then inspect specific refs or test IDs. Avoid pasting full snapshots into the
-prompt unless the user explicitly asks for raw data.
+## Observe With Low Context
 
-When multiple apps are injected, select the active runtime before probing:
+Start broad, then inspect only specific refs or test IDs:
 
 ```bash
-loupe runtimes
-loupe use <bundle-id>
-loupe current
+loupe capture-report --bundle-id com.example.App --output /tmp/loupe-report
+loupe fetch <runtime-host>/snapshot --output /tmp/loupe-snapshot.json
+loupe compact /tmp/loupe-snapshot.json
+loupe tree /tmp/loupe-snapshot.json --accessibility --depth 3
+loupe tree /tmp/loupe-snapshot.json --view --depth 3
+loupe screen-map /tmp/loupe-snapshot.json --limit 80
+loupe inspect /tmp/loupe-snapshot.json --test-id target.id
 ```
 
-Prefer `--bundle-id <id>` on `tree`, `query`, `set`, and `mutations` when the
-target app is known. Do not keep retrying the default `http://127.0.0.1:8765`
-after a timeout if `loupe runtimes` shows the app on another host.
-`wait-for-visible`, `wait-for-gone`, and `wait-for-value` also use the current
-runtime selection; pass `--bundle-id`, `--udid`, or `--host` only when you need
-to override it.
+Use `capture-report` when screenshots matter; it stores screenshot, snapshot,
+screen-map, accessibility, compact, audit, runtime, and summary artifacts
+together. Use `screen-map` for visible semantic/styled elements. Use
+`paint-stack` when a visual change appears covered. Use `audit`, `subtree`,
+`query`, and `text-map` only when they answer the next concrete question.
 
-For deep system apps, a low depth can show only containers. If `--depth 3`
-only shows container nodes, retry depth 6-8, or switch to:
+If shallow trees only show containers, retry with depth 6-8 or use:
 
 ```bash
 loupe tree --accessibility --text
@@ -133,181 +71,84 @@ loupe tree --interesting
 loupe tree --visible-leaves
 ```
 
-Use the accessibility tree for text discovery and tap targets. Use the view
-tree plus `inspect` for mutation refs, UIKit class names, style, and layout.
-
-## Actions
-
-Loupe CLI action commands exist for runtime E2E:
+## Act And Verify
 
 ```bash
-loupe tap --test-id checkout.payButton --udid booted
-loupe tap --test-id checkout.payButton --udid booted --trace-dir /tmp/loupe-trace
-loupe tap --test-id checkout.payButton --udid booted --expect-visible checkout.confirmation
+loupe tap --test-id checkout.payButton --udid booted --trace-dir /tmp/loupe-trace --expect-visible checkout.confirmation
+loupe tap --snapshot /tmp/loupe-snapshot.json --ref n21 --udid booted
+loupe tap --x 201 --y 274 --udid booted --width 438 --height 954
+loupe swipe --from 219,760 --to 219,190 --udid booted --width 438 --height 954 --trace-dir /tmp/loupe-trace
 loupe drag --from 4,420 --to 360,420 --udid booted --duration 0.8
-loupe swipe --from 219,760 --to 219,190 --udid booted --width 438 --height 954
 loupe type "Ada" --udid booted
-```
-
-They use Loupe's native host-side HID backend. If dispatch fails, use
-`loupe doctor` and the project docs rather than adding setup commands to this
-skill. `loupe pinch` is intentionally not listed above because pinch dispatch is
-not implemented yet.
-
-`loupe swipe` verifies scroll offset changes when the start point is inside a
-scrollable UIKit view with remaining room in the gesture direction. If the HID
-event succeeds but the offset does not move, treat the action as failed and
-retry with a point inside visible content. Use `--no-verify-scroll` only for
-non-scroll swipe gestures.
-
-Failed actions automatically create a trace under `/tmp/loupe-traces`. Trace
-bundles include before/after snapshots, accessibility trees, logs, screenshots,
-an action record, and `target-crop.png` when a target frame was available.
-
-The product direction is runtime E2E through Loupe commands without requiring
-XCTest, `xcodebuild test`, or a UI test bundle as the public harness.
-
-## Debugging
-
-Run:
-
-```bash
-loupe doctor
-```
-
-If injection does not start the server:
-
-- Confirm the app is running in iOS Simulator, not a real device.
-- Confirm `loupe injector-path` prints an executable path.
-- Relaunch the app with `loupe launch --bundle-id <id> --inject`.
-- Check `loupe current`, then `<runtime-host>/health`.
-
-## Design Comparison
-
-Figma API integration is not part of the skill yet. Use the JSON contract in
-`Docs/FigmaComparison.md` for fixture work:
-
-```bash
-loupe compare-design snapshot.json figma-export.json
-```
-
-Match design nodes to Loupe nodes by `testID` first, then role plus text, then
-geometry. Use Loupe view tree data for layout/style comparison and accessibility
-tree data only for movement/input selectors.
-
-## Design Implementation Quality Gate
-
-When implementing from Figma, screenshots, or visual references, treat the
-Loupe view tree as the primary structured source of truth for runtime UI
-quality. Screenshots are still required, but they are the visual sanity check;
-they should not replace view-tree inspection. Do not report completion after
-only collecting `snapshot`, `tree`, `inspect`, `audit`, screenshots, or action
-traces; use them to reject bad implementations and iterate.
-
-Required loop:
-
-```bash
-loupe fetch <runtime-host>/snapshot --output /tmp/loupe-snapshot.json
-loupe tree /tmp/loupe-snapshot.json --view --depth 6
-loupe inspect /tmp/loupe-snapshot.json --test-id key.control
-loupe audit /tmp/loupe-snapshot.json
-loupe text-map /tmp/loupe-snapshot.json --accessibility
-loupe tree /tmp/loupe-snapshot.json --accessibility --depth 6
-loupe screenshot --udid booted --output /tmp/loupe-screen.png
-loupe tap --test-id key.control --udid booted --trace-dir /tmp/loupe-trace
 loupe trace-summary /tmp/loupe-trace
+loupe diff /tmp/loupe-trace/before-snapshot.json /tmp/loupe-trace/after-snapshot.json --changed-only
+loupe explore-routes --bundle-id com.example.App --limit 5 --trace-dir /tmp/loupe-routes --output /tmp/loupe-routes.json --json
 ```
 
-Use the view tree first to verify structure, layout ownership, scroll
-containers, frames, colors, corner radius, text-bearing nodes, and UIKit
-metadata. Use the accessibility tree for movement and input selectors. Use
-screenshots to catch visual composition issues the tree cannot prove, such as
-wrong imagery, crop quality, shadows, and overall polish.
-
-For design-to-code work, turn the view tree into an anchor table before
-declaring success. Pick the main screen anchors from the design, then compare
-their runtime frames from `tree` or `inspect`: root/screen, primary title,
-first major image/card, fixed chrome such as tab bars, and at least one
-scrollable container. Fix the largest frame or hierarchy miss before polishing
-smaller visual differences.
-
-Verify the runtime screen size before judging visual quality. If
-`snapshot.screen.size` is unexpectedly small or does not match the intended
-device class, fix app packaging or launch setup first. A common cause is an iOS
-app without a launch screen running in legacy compatibility dimensions; any
-pixel comparison or anchor table from that state is invalid.
-
-If a design screenshot or Figma render is available, keep it beside the Loupe
-screenshot and compare them after every substantial change. A Loupe-aided
-implementation is not successful just because it has more artifacts; it should
-be at least as close to the reference as a reasonable no-Loupe baseline while
-also proving runtime structure and actions through the view tree and traces.
-
-Reject the result and fix the implementation when any of these are true:
-
-- The implementation mixes real simulator chrome/safe-area behavior with design
-  chrome in a way that shifts the whole screen. If the design includes a status
-  bar or device chrome as part of the target, either hide the real status bar
-  and implement that chrome intentionally, or remove the duplicated design
-  chrome. Verify the root and title frames against the design anchors.
-- `snapshot.screen.size` indicates compatibility-mode or wrong-device rendering,
-  such as a tiny legacy canvas instead of the intended iPhone screen size.
-- A fixed element such as a tab bar, navigation bar, bottom sheet chrome, or
-  persistent action bar is inside a content scroll view.
-- A horizontal carousel is implemented as a vertical or mixed-axis scroll view.
-- A screen that should scroll only proves a `UIScrollView` exists, but no
-  action trace shows a meaningful `contentOffset` or visible-frame change.
-- A partially visible carousel item uses a pre-cropped media asset. Use a
-  full-size leaf asset and let the scroll view or clipping container crop it.
-- A design source provides image-fill assets, but the implementation uses
-  screenshot crops, placeholders, or generated substitutes for those leaf media.
-- Text or badges that are layered over an image in the design are baked into the
-  bitmap or omitted instead of being implemented as separate UI layers.
-- A visible image, card, sheet, or button is clipped unexpectedly.
-- A key route cannot be exercised by a Loupe action trace.
-- A key visible element has the wrong text, role, frame, `cornerRadius`, color,
-  or scroll metadata in `inspect` or the view tree.
-- The simulator screenshot is SpringBoard, a system permission prompt, an
-  `Open in ...?` confirmation, or any screen other than the intended app state.
-
-For visual-heavy screens, do not use a full-screen screenshot as the app UI.
-Use native UI for structure, text, controls, scrolling, and routing. Use bitmap
-assets only for leaf media such as book covers, photos, avatars, maps, album art,
-or product images.
-
-## Cleanup
-
-```bash
-loupe cleanup
-loupe cleanup --traces-older-than 14d
-```
-
-Use `cleanup` to prune stale runtime records and old trace bundles.
+Failed actions write traces under `/tmp/loupe-traces`. For scroll gestures,
+treat a successful HID response with no offset or visible-frame change as a
+failed action unless you intentionally pass `--no-verify-scroll`. Use
+`explore-routes` for a route sweep; use `trace-summary` on individual action
+trace directories, not on the route report root.
 
 ## Runtime Mutation
 
+Mutations are optional developer-only experiments against the injected runtime.
+Prefer stable `testID`; use `ref` only within the same observed screen. Text,
+colors, alpha, hidden state, layer styling, and common control values are better
+targets than layout-owned frame changes.
+
 ```bash
-loupe set --udid <UDID> --test-id example.components.label text "Runtime edited"
-loupe set --udid <UDID> --test-id example.design.card backgroundColor --color '#ff3366'
-loupe set --udid <UDID> --test-id example.design.card frame --rect 20,120,220,80
-loupe set --udid <UDID> --test-id example.design.card frame --rect 20,120,220,80 --no-animate
-loupe set-many --udid <UDID> --refs n21,n22 backgroundColor --colors FFE4E6_1 FFE8CC_1 --trace-dir /tmp/loupe-set-many
-loupe constraints --udid <UDID> --test-id example.design.card --json
-loupe set-constraint --udid <UDID> --id <constraint-id> constant 120
-loupe deactivate-constraint --udid <UDID> --id <constraint-id>
-loupe set --udid <UDID> --list
+loupe mutations --test-id example.design.card
+loupe set --test-id example.design.card backgroundColor --color '#ff3366' --output /tmp/loupe-set.json
+loupe set --test-id example.design.card frame --rect 20,120,220,80 --no-animate --output /tmp/loupe-set.json
+loupe set-many --refs n21,n22 backgroundColor --colors FFE4E6_1 FFE8CC_1 --trace-dir /tmp/loupe-set-many
+loupe wait-for-value --test-id example.design.card --key style.backgroundColor.red --equals 1 --output /tmp/loupe-wait.json
 loupe reflect /tmp/loupe-set.json --source ./Sources
 ```
 
-Use `set` for developer-only UI iteration against the injected runtime. Prefer
-stable `testID` selectors; use `ref` only within the same observed screen.
-Use `--output <path>` when mutating from an agent loop so the CLI prints a short
-summary and keeps the full JSON in an artifact.
-Use `wait-for-value --key <path> --equals <value> --output <path>` for compact
-verification output; the full matched node is written to the artifact.
-Property mutations animate by default. Use `--no-animate` when the test or
-verification needs the immediate state.
-Use `constraints` before changing Auto Layout constraints, then read the
-mutation response's effective state to confirm UIKit kept the requested value.
-Use `reflect` after a verified mutation to summarize before/after state, confirm
-the target hierarchy, and find source lines containing the test ID.
+Property mutations animate by default; use `--no-animate` when verification
+needs immediate state. Treat frame and Auto Layout mutations as probes unless
+the effective state confirms UIKit kept the requested value.
+
+## Design Quality Loop
+
+When implementing from Figma, screenshots, or visual references, use Loupe
+artifacts to reject bad runtime UI and iterate. Screenshots are necessary, but
+the view tree is the structured source of truth.
+
+```bash
+loupe capture-report --bundle-id com.example.App --output /tmp/loupe-report
+loupe screen-map /tmp/loupe-report/snapshot.json --limit 120
+loupe tree /tmp/loupe-report/snapshot.json --view --depth 6
+loupe inspect /tmp/loupe-report/snapshot.json --test-id key.control
+loupe audit /tmp/loupe-report/snapshot.json
+loupe screenshot --udid booted --output /tmp/loupe-screen.png
+loupe tap --test-id key.control --udid booted --trace-dir /tmp/loupe-trace
+```
+
+Before declaring success, compare a small anchor table: screen/root, primary
+title, first major image/card, fixed chrome, and at least one scroll container.
+Fix the largest frame or hierarchy miss before polishing small visual details.
+
+Reject and fix when screen size is wrong, simulator chrome is duplicated, fixed
+chrome scrolls with content, carousel axis or scroll behavior is wrong, key
+text/frame/color/corner radius/clipping metadata is wrong, a route cannot be
+traced, or the screenshot is not the intended app state. Visual-heavy screens
+should use native structure plus leaf media assets, not a full-screen screenshot
+as the UI.
+
+Use `Docs/FigmaComparison.md` for fixture-based `compare-design` data. Match by
+`testID` first, then role plus text, then geometry.
+
+## Debug
+
+```bash
+loupe doctor
+loupe injector-path
+loupe cleanup --dry-run
+```
+
+If injection does not start the server, confirm the app is running in Simulator,
+the injector path is executable, relaunch with `loupe launch --bundle-id <id>
+--inject`, then check `loupe current` and `<runtime-host>/health`.

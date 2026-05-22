@@ -1,8 +1,7 @@
 # Figma Comparison
 
-Loupe does not call the Figma API directly yet. The near-term design comparison
-contract is a small exported JSON file that can be produced by a Figma plugin,
-script, or manual fixture.
+Loupe does not call the Figma API directly. The comparison command consumes a
+small exported design JSON produced by a plugin, script, or manual fixture.
 
 ## Minimal Design JSON
 
@@ -30,39 +29,42 @@ script, or manual fixture.
 
 ## Matching Policy
 
-Compare a Loupe snapshot to design nodes in this order:
+Loupe matches design nodes in this order:
 
 1. `testID` / accessibility identifier exact match.
 2. Role plus exact visible text.
 3. Role plus nearest center point.
 4. Visual fallback by frame and size similarity.
 
-## Command
+## Runtime Evidence Loop
 
 ```bash
 loupe capture-report --bundle-id com.example.App --output loupe-report
-loupe screen-map snapshot.json --limit 120
-loupe paint-stack snapshot.json --point 201,319
-loupe compare-design snapshot.json figma-export.json
-loupe compare-design snapshot.json figma-export.json --json
+loupe screen-map loupe-report/snapshot.json --limit 120
+loupe tree loupe-report/snapshot.json --view --depth 6
+loupe paint-stack loupe-report/snapshot.json --point 201,319
+loupe compare-design loupe-report/snapshot.json figma-export.json
+loupe compare-design loupe-report/snapshot.json figma-export.json --json
 ```
 
-Use `capture-report` when a design loop needs both screenshot judgment and
-runtime structure. Use `screen-map` before a formal comparison when an agent
+Use `capture-report` when a design loop needs screenshot judgment and runtime
+structure together. Use `screen-map` before formal comparison when an agent
 needs a DOM-like runtime summary. Use `paint-stack` when a visual target is
-covered by an overlay, content view, blur view, or same-frame child. These
-outputs are intentionally not Figma-specific: the same artifacts can be compared
-with a Figma export, a hand-written fixture, or another runtime snapshot.
+covered by an overlay, content view, blur view, or same-frame child.
 
-The command reports:
+## Reported Deltas
+
+`compare-design` reports:
 
 - missing design nodes
 - unexpected app nodes
 - frame deltas
-- color, corner radius, font name, and font size deltas
+- color deltas
+- corner radius deltas
+- font name and font size deltas
 
-This should stay separate from screenshot baseline diffing. Figma comparison is
-for structural and property drift; screenshot diffing is for pixel-level visual
+This is separate from screenshot baseline diffing. Figma comparison is for
+structural and property drift; screenshot diffing is for pixel-level visual
 regressions.
 
-Spacing deltas between matched siblings are still a planned follow-up.
+Spacing and alignment deltas between matched siblings are planned follow-ups.

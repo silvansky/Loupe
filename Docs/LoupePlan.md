@@ -1,189 +1,141 @@
-# Loupe Plan
+# Loupe Architecture Notes
+
+Loupe is an iOS Simulator harness for runtime observation, simulator-visible
+input, and fast UI iteration.
 
 ## Goals
 
-Build an iOS Simulator harness that supports:
+- Capture high-fidelity UIKit and accessibility state from inside the app.
+- Give agents compact context by default and full snapshots on demand.
+- Resolve stable selectors for inspection and action.
+- Execute real simulator input without making XCTest the public harness.
+- Keep screenshots, logs, diffs, and traces for reproducible failures.
+- Let developers try supported UIKit mutations at runtime, verify effective
+  state, and reflect successful experiments back into source.
 
-- functional E2E flows
-- view-tree and property observation
-- custom app metadata
-- screenshot-based visual QA
-- rule-based layout/style QA
+Figma API integration is not part of the runtime architecture. Design checks use
+Loupe snapshots, screenshots, screen maps, audits, and optional exported design
+fixtures.
 
-Figma API integration is intentionally out of scope for now.
-
-See `Docs/Goal.md` for the current runtime E2E goal contract.
-
-## Architecture
+## Components
 
 ```text
-Host runner
-  - starts simulator/app
-  - stores full snapshots
-  - sends compact observations to the LLM
-  - executes actions through Loupe runtime commands
-  - dispatches low-level input through Loupe's native HID backend
-  - stores screenshots, diffs, logs, and traces
+loupe CLI
+  - launches and injects apps
+  - records runtime host mappings
+  - stores snapshots, reports, screenshots, logs, and traces
+  - resolves selectors and dispatches host-side simulator input
 
-LoupeKit
-  - captures UIWindowScene/UIWindow/UIView tree
-  - captures structured UIKit and accessibility properties
-  - exposes full node inspection and basic layout audit endpoints
-  - exposes allowlisted runtime UIKit property mutation
-  - exposes custom metadata
-  - exposes runtime logs
-  - serves snapshots over localhost transport
-
-LoupeInjector
-  - simulator-only dynamic library
-  - starts LoupeServer from a dylib constructor path
-  - works for basic observation without linking LoupeKit into the app
-
-Homebrew install
-  - installs loupe CLI into bin
-  - installs LoupeInjector.framework into libexec
-  - lets loupe launch --inject resolve the injector path automatically
+LoupeKit / LoupeInjection
+  - runs inside the simulator app
+  - captures view, accessibility, UIKit, layout, style, and metadata state
+  - exposes localhost runtime endpoints
+  - applies allowlisted UIKit mutation experiments on the app main thread
 
 LoupeCore
-  - Codable full snapshot
-  - compact observation
-  - selector queries
-  - ref-based action targets
+  - shared models for snapshots, accessibility trees, queries, audits, diffs,
+    compact observations, and design comparison
 ```
 
-## Action Boundary
+Homebrew installs both the CLI and `LoupeInjector.framework`; `loupe start`
+resolves the injector path automatically.
 
-Loupe should not rely on app-internal private `UIEvent` synthesis as the primary
-interaction mechanism. The app-side SDK and injector observe state. Host-side
-runtime commands should execute interactions without requiring `xcodebuild test`,
-XCTest cases, or a test bundle as the public harness.
+## Runtime Selection
 
-The action backend may use lower-level simulator facilities or a dedicated host
-process, but XCTest/XCUITest and WebDriverAgent-style runners are compatibility
-or research backends, not the target product path.
+Injected apps bind to localhost. The CLI launch path chooses an available port
+unless `--port` or `LOUPE_PORT` is explicitly provided. Do not build workflows
+around a fixed default port.
 
-The target flow is:
+Use stable identity first:
 
-```text
-loupe tap --test-id checkout.payButton
-  -> fetch /snapshot
-  -> resolve node frame
-  -> execute simulator input through the runtime action backend
-  -> store trace artifacts
+```bash
+loupe runtimes
+loupe use com.example.App
+loupe current
+loupe capture-report --bundle-id com.example.App --output loupe-report
 ```
 
-The current proof for this flow has been productized into Loupe CLI runtime
-actions. The older example UI test remains useful as a compatibility check, not
-as the primary action architecture.
+Use `--host <runtime-host>` only when it comes from `loupe runtimes` or
+`loupe current`.
 
 ## Observation Policy
 
 Do not put the whole tree into LLM context by default.
 
-Default observation:
+Default agent context should come from:
 
-- screen size, scale, interface style
-- visible texts, capped
-- visible interactive elements, capped, including UIKit type/class identity
-- per-snapshot `ref` values
+- `compact`
+- `tree --accessibility`
+- `tree --view`
+- `screen-map`
+- targeted `inspect`
+- `trace-summary`
+- `diff --changed-only`
 
-Implemented host-side query primitives:
+Use accessibility for movement/input selectors and text discovery. Use the view
+tree for layout, style, UIKit properties, mutation refs, and design checks.
 
-- `testID`
-- `text`
-- `role`
-- `ref`
+## Action Boundary
 
-Later on-demand tools:
+Loupe should not rely on app-internal `UIEvent` synthesis as the main action
+strategy. App-side code observes state; host-side Loupe commands dispatch user
+visible input through the simulator.
 
-- `search(query)`
-- `subtree(ref, depth)`
-- `screenshotCrop(rect)`
+Target flow:
 
-Implemented on-demand detail tools:
+```text
+loupe tap --test-id checkout.payButton --trace-dir /tmp/loupe-trace
+  -> fetch runtime accessibility/snapshot state
+  -> resolve target and coordinates
+  -> dispatch native simulator input
+  -> capture after state, screenshot, logs, and diff
+```
 
-- `inspect(ref/testID/text/role)` for the full node plus parent, siblings, and
-  children summaries
-- `audit(snapshot)` for sibling overlap and child-outside-parent issues
+`tap`, `swipe`, `drag`, and `type` are implemented. `pinch` remains planned.
+Tap-by-text is intentionally not the public contract because visible text is
+ambiguous; prefer `testID`, `ref`, or coordinates.
 
 ## Runtime Mutation
 
-Loupe follows Lookin's high-level idea of resolving a runtime object and
-applying a typed property update on the app main thread, but does not expose
-arbitrary Objective-C selectors. The public shape is:
+Mutation is a runtime experiment path, not a guarantee that UIKit will keep every
+requested value. Support is allowlisted, not arbitrary Objective-C selector
+execution.
 
 ```bash
-loupe set --test-id checkout.title text "New title"
+loupe mutations --test-id checkout.card
+loupe set --test-id checkout.title text "New title" --output /tmp/loupe-set.json
 loupe set --test-id checkout.card backgroundColor --color '#ff3366'
-loupe set --test-id checkout.card frame --rect 20,120,220,80
 loupe set --test-id checkout.card frame --rect 20,120,220,80 --no-animate
-loupe set --list
+loupe reflect /tmp/loupe-set.json --source ./Sources
 ```
 
-The injected server handles `POST /mutate` with a selector, property path, and
-typed value. Supported properties are intentionally allowlisted: frame/bounds,
-alpha, hidden, background/text/border colors, corner radius, accessibility
-strings, label/button/text field text, font size, text alignment, and common
-control values.
+Supported families include view, layer, accessibility, text, control, scroll,
+stack, and Auto Layout constraint properties. Text, colors, alpha, hidden state,
+layer styling, and common control values are the strongest targets. Frame and
+constraint edits are useful probes, but UIKit owners may restore them during a
+layout pass. Mutation responses include requested and effective state so those
+reversions are visible.
 
-`loupe set` animates property mutations by default for visual iteration. Use
-`--no-animate` for immediate application, or pass `--duration`, `--delay`, and
-`--curve` when a specific animation is needed.
+## Design Verification
 
-Mutation support is registry-based, not a single hard-coded switch. New UIKit
-coverage should be added as a descriptor group in `LoupeAgent`: view, layer,
-accessibility, text, control, scroll, stack, or another UIKit-family group. The
-runtime `/mutations` endpoint and `loupe set --list` expose the active registry
-so agents can discover support before editing a screen.
+Design implementation is considered successful only when runtime evidence
+supports it:
 
-## Runtime Edit To Code Loop
+- screen size matches the intended simulator
+- fixed chrome does not scroll with content
+- scroll gestures produce meaningful content movement
+- key route actions produce traceable state changes
+- key elements have expected text, frame, color, corner radius, clipping, and
+  hierarchy
+- screenshots match the intended visual state
 
-The intended developer loop is:
+Use `Docs/FigmaComparison.md` for optional exported-design fixture comparison.
 
-```bash
-loupe tree --udid <UDID> --view --depth 3
-loupe set --udid <UDID> --test-id checkout.title text "Runtime title" --output /tmp/loupe-set.json
-loupe fetch http://127.0.0.1:<port>/snapshot --output /tmp/loupe-after.json
-loupe inspect /tmp/loupe-after.json --test-id checkout.title
-loupe reflect /tmp/loupe-set.json --source ./Sources --output /tmp/loupe-reflect.json
-```
+## Planned Work
 
-`reflect` is advisory. It does not edit source files by itself; it returns
-before/after summaries, target hierarchy context, and candidate files/lines
-containing the stable test ID. The agent or developer then decides the smallest
-matching source change and reruns Loupe verification.
-
-## Validation Types
-
-Functional E2E:
-
-```swift
-futureTap(ref)
-type(ref, text)
-swipe(ref, direction)
-waitForVisible(testID)
-```
-
-Visual QA:
-
-```swift
-expectScreen("checkout.default").toMatchBaseline(threshold: 0.01)
-```
-
-Layout/style QA:
-
-```swift
-expect("checkout.payButton").toHaveFrame(height: 52)
-expect("checkout.payButton").toHaveStyle(cornerRadius: 12)
-expect("checkout.payButton").toBeBelow("checkout.password", spacing: 16)
-```
-
-## Next Implementation Steps
-
-1. Expand native HID coverage for pinch and hardware-button events.
-2. Add trace artifacts for every action: before/after snapshots, screenshots,
-   target resolution, and logs.
-3. Add screenshot capture and baseline diff storage.
-4. Add richer selector scoring.
-5. Expand layout/style assertion primitives.
-6. Add a generated Codex skill/package release flow.
+1. Implement native HID pinch.
+2. Add screenshot baseline diffing.
+3. Expand layout/style assertions for spacing, typography, alignment, clipping,
+   and z-order intent.
+4. Improve selector scoring for ambiguous accessibility and view-tree matches.
+5. Continue refining the Loupe skill with measured agent A/B loops.
