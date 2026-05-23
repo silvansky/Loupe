@@ -2,7 +2,7 @@
   <img src="Docs/Assets/loupe-wordmark.svg" alt="Loupe" width="360">
 </p>
 
-Runtime UI context for LLM agents working with iOS apps.
+A CLI that gives LLM agents runtime UI context from running iOS Simulator apps.
 
 Loupe lets LLM agents inspect, interact with, and verify UI behavior in running
 iOS Simulator apps through UIKit view hierarchies and properties, accessibility

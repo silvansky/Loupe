@@ -911,7 +911,7 @@ struct LoupeCLI {
 
     static func summaryHelp(version: String) -> String {
         """
-        OVERVIEW: Runtime UI context for LLM agents working with iOS apps.
+        OVERVIEW: A CLI that gives LLM agents runtime UI context from running iOS Simulator apps.
 
         VERSION: \(version)
 

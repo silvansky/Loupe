@@ -1,5 +1,5 @@
 class Loupe < Formula
-  desc "iOS Simulator screen-context harness for UI automation agents"
+  desc "A CLI that gives LLM agents runtime UI context from running iOS Simulator apps"
   homepage "https://github.com/heoblitz/Loupe"
   url "https://github.com/heoblitz/Loupe/archive/refs/tags/v0.1.4.tar.gz"
   sha256 "de39a6a68a7732b1a9cdef91f1c9f614df71949dff5ad5be65d669d8a853e4c1"
