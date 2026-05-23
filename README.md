@@ -10,7 +10,8 @@ metadata, screenshots, and simulator input.
 
 ## Demo
 
-https://github.com/user-attachments/assets/52471c43-ec43-4654-9477-b06413660734
+https://github.com/user-attachments/assets/8bdc57f4-f673-480c-b970-535cfc96012c
+
 
 ## Install
 
