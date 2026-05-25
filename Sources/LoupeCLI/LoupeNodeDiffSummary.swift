@@ -10,4 +10,11 @@ struct LoupeNodeDiffSummary: Codable {
     var testID: String?
     var text: String?
     var frame: LoupeRect?
+    var isVisible: Bool?
+}
+
+extension LoupeNodeDiffSummary {
+    var isVisibleForSummary: Bool {
+        isVisible != false
+    }
 }

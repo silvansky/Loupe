@@ -1006,24 +1006,40 @@ struct LoupeCLI {
             return BatchMutationOptions.usage
         case "set", "mutate":
             return MutationSetOptions.usage
+        case "accessibility":
+            return "Usage: loupe accessibility <snapshot.json> [--include-hidden]"
+        case "audit":
+            return AuditOptions.usage
+        case "compact":
+            return "Usage: loupe compact <snapshot.json>"
         case "capture-report":
             return "Usage: loupe capture-report [--host <url>] [--udid <sim>] [--bundle-id <id>] --output <dir> [--screen-map-limit <n>] [--timeout <seconds>]"
+        case "compare-design":
+            return "Usage: loupe compare-design <snapshot.json> <design.json> [--json] [--limit <n>] [--frame-tolerance <n>] [--color-tolerance <n>] [--no-unexpected]"
+        case "fetch":
+            return "Usage: loupe fetch <url> [--output <path>] [--timeout <seconds>]"
+        case "runtime":
+            return "Usage: loupe runtime [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>] [--timeout <seconds>]"
         case "logs":
             return "Usage: loupe logs [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]"
         case "diff":
             return "Usage: loupe diff <before-snapshot.json> <after-snapshot.json> [--json] [--changed-only] [--limit <n>]"
+        case "reflect":
+            return "Usage: loupe reflect <mutation-response.json> --source <dir> [--output <path>]"
         case "explore-routes":
             return "Usage: loupe explore-routes [--host <url>] [--udid <sim>] [--bundle-id <id>] [--limit <n>] [--settle <seconds>] [--back-point x,y] [--trace-dir <dir>] [--output <path>] [--json]"
         case "trace-summary":
             return "Usage: loupe trace-summary <trace-dir> [--json] [--limit <n>]"
         case "tap":
-            return "Usage: loupe tap (--test-id <id> | --ref <ref> | --x <n> --y <n>) --udid <sim> [--host <url>] [--snapshot <snapshot.json>] [--trace-dir <path>] [--expect-visible <testID>]"
+            return "Usage: loupe tap (--test-id <id> | --ref <ref> | --x <n> --y <n>) --udid <sim> [--host <url>] [--snapshot <snapshot.json>] [--trace-dir <path>] [--expect-visible <testID|text:<text>|exactText:<text>|role:<role>|ref:<ref>>]"
         case "swipe":
             return "Usage: loupe swipe --from x,y --to x,y --udid <sim> [--host <url>] [--duration <seconds>] [--no-verify-scroll] [--trace-dir <path>]"
         case "drag":
             return "Usage: loupe drag --from x,y --to x,y --udid <sim> [--host <url>] [--duration <seconds>] [--trace-dir <path>]"
         case "type":
             return "Usage: loupe type <text> --udid <sim> [--host <url>] [--trace-dir <path>]"
+        case "pinch":
+            return "Usage: loupe pinch --from x,y --start-spread <n> --end-spread <n> --udid <sim> [--host <url>] [--trace-dir <path>]\n\nNote: pinch is reserved but not implemented by the native HID backend yet."
         case "wait-for-visible":
             return "Usage: loupe wait-for-visible (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>] [--timeout <seconds>]"
         case "wait-for-gone":
@@ -1037,12 +1053,20 @@ struct LoupeCLI {
 
             Print a human-readable tree. Use --mutable to discover refs likely useful for runtime mutation.
             """
+        case "query":
+            return "Usage: loupe query [snapshot.json] (--test-id <id> | --text <text> | --exact-text <text> | --role <role> | --ref <ref>) [--host <url>] [--udid <sim>] [--bundle-id <id>] [--tree view|accessibility] [--max-results <n>]"
+        case "inspect":
+            return "Usage: loupe inspect <snapshot.json> (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--include-hidden] [--fields node,parent,children,siblings]"
+        case "subtree":
+            return "Usage: loupe subtree <snapshot.json> (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--depth <n>] [--include-hidden]"
         case "text-map":
             return "Usage: loupe text-map [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--accessibility]"
         case "screen-map":
             return "Usage: loupe screen-map [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--include-hidden] [--include-containers] [--limit <n>]"
         case "runtimes", "apps":
             return "Usage: loupe runtimes [--json] [--timeout <seconds>]"
+        case "use":
+            return "Usage: loupe use [--host <url>] [--udid <sim>] [--bundle-id <id>] [--timeout <seconds>]"
         case "mutations":
             return """
             Usage: loupe mutations [--host <url>] [--udid <sim>] [--bundle-id <id>]
@@ -1062,6 +1086,12 @@ struct LoupeCLI {
             return "Usage: loupe screenshot --udid <sim> --output <path> [--timeout <seconds>]"
         case "cleanup":
             return "Usage: loupe cleanup [--dry-run] [--no-runtimes] [--no-traces] [--traces-older-than <duration>|--all-traces] [--timeout <seconds>]"
+        case "doctor":
+            return "Usage: loupe doctor"
+        case "injector-path":
+            return "Usage: loupe injector-path"
+        case "skills", "install-skills":
+            return "Usage: loupe skills install [--target all|codex|claude] [--source <skills/loupe>]"
         case "current":
             return "Usage: loupe current [--json] [--timeout <seconds>]"
         case "version", "--version":
@@ -1708,7 +1738,7 @@ struct LoupeCLI {
                options.screen.height > 0,
                options.traceDirectory == nil,
                !options.hostWasExplicit,
-               options.expectVisibleTestID == nil {
+               options.expectVisibleSelector == nil {
                 let coordinateTarget = ActionTarget(point: point, screen: options.screen, screenScale: 1, source: .coordinates)
                 target = coordinateTarget
                 try dispatchAction(command: command, options: options, target: coordinateTarget)
@@ -1746,7 +1776,7 @@ struct LoupeCLI {
             if let scrollBaseline {
                 try await verifyScrollChanged(scrollBaseline, host: options.host, timeout: options.timeout)
             }
-            if let expected = options.expectVisibleTestID {
+            if let expected = options.expectVisibleSelector {
                 try await expectVisible(expected, host: options.host, timeout: options.timeout)
             }
             if let traceDirectory = options.traceDirectory {
@@ -1894,11 +1924,11 @@ struct LoupeCLI {
         }
     }
 
-    private static func expectVisible(_ testID: String, host: URL, timeout: TimeInterval) async throws {
+    private static func expectVisible(_ selector: LoupeSelector, host: URL, timeout: TimeInterval) async throws {
         let options = WaitForOptions(
             host: host,
             hostWasExplicit: true,
-            selector: .testID(testID),
+            selector: selector,
             timeout: timeout,
             interval: 0.25,
             keyPath: nil,
@@ -1928,7 +1958,7 @@ struct LoupeCLI {
                 return
             }
             guard Date() < deadline else {
-                throw CLIError("Timed out waiting for expected visible Loupe node: \(testID)")
+                throw CLIError("Timed out waiting for expected visible Loupe node: \(selectorDescription(selector))")
             }
             try await Task.sleep(nanoseconds: UInt64(options.interval * 1_000_000_000))
         }
@@ -2772,7 +2802,8 @@ struct LoupeCLI {
                 &errorMessage
             )
         case "type":
-            status = LoupeHIDType(udid, options.text ?? "", &errorMessage)
+            try copyTextToSimulatorPasteboard(options.text ?? "", udid: udid)
+            status = LoupeHIDPaste(udid, &errorMessage)
         case "pinch":
             throw CLIError("pinch is not supported by the native HID backend yet")
         default:
@@ -2786,6 +2817,36 @@ struct LoupeCLI {
             }
         } else if status != 0 {
             throw CLIError("native HID \(command) failed")
+        }
+    }
+
+    private static func copyTextToSimulatorPasteboard(_ text: String, udid: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "pbcopy", udid]
+        let input = Pipe()
+        let output = Pipe()
+        let error = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = error
+
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in semaphore.signal() }
+        try process.run()
+        if let data = text.data(using: .utf8) {
+            input.fileHandleForWriting.write(data)
+        }
+        try input.fileHandleForWriting.close()
+
+        if semaphore.wait(timeout: .now() + 10) == .timedOut {
+            process.terminate()
+            throw CLIError("simctl pbcopy timed out after 10s")
+        }
+        guard process.terminationStatus == 0 else {
+            let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CLIError("simctl pbcopy exited with status \(process.terminationStatus)\(stderr.map { ": \($0)" } ?? "")")
         }
     }
 
@@ -2991,10 +3052,10 @@ struct LoupeCLI {
         let afterKeys = Set(afterIndex.keys)
 
         let appeared = afterKeys.subtracting(beforeKeys)
-            .compactMap { key in afterIndex[key].map { diffNodeSummary(key: key, node: $0) } }
+            .compactMap { key in afterIndex[key].map { diffNodeSummary(key: key, node: $0, screen: after.screen.size) } }
             .sorted { $0.key < $1.key }
         let disappeared = beforeKeys.subtracting(afterKeys)
-            .compactMap { key in beforeIndex[key].map { diffNodeSummary(key: key, node: $0) } }
+            .compactMap { key in beforeIndex[key].map { diffNodeSummary(key: key, node: $0, screen: before.screen.size) } }
             .sorted { $0.key < $1.key }
 
         let changed = beforeKeys.intersection(afterKeys)
@@ -3002,11 +3063,11 @@ struct LoupeCLI {
                 guard let beforeNode = beforeIndex[key], let afterNode = afterIndex[key] else {
                     return nil
                 }
-                let changes = changedFields(before: beforeNode, after: afterNode)
+                let changes = changedFields(before: beforeNode, after: afterNode, screen: after.screen.size)
                 guard !changes.isEmpty else {
                     return nil
                 }
-                return LoupeNodeChange(key: key, summary: nodeSummary(afterNode), changes: changes)
+                return LoupeNodeChange(key: key, summary: nodeSummary(afterNode, screen: after.screen.size), changes: changes)
             }
             .sorted { $0.key < $1.key }
 
@@ -3023,8 +3084,8 @@ struct LoupeCLI {
         var counts: [String: Int] = [:]
         var result: [String: LoupeNode] = [:]
 
-        for node in snapshot.nodes.values {
-            let baseKey = nodeIdentityKey(node)
+        for node in snapshot.nodes.values where !suppressesDiffNode(node, in: snapshot) {
+            let baseKey = nodeIdentityKey(node, screen: snapshot.screen.size)
             let count = counts[baseKey, default: 0]
             counts[baseKey] = count + 1
             let key = count == 0 ? baseKey : "\(baseKey)#\(node.ref)"
@@ -3033,7 +3094,49 @@ struct LoupeCLI {
         return result
     }
 
-    private static func nodeIdentityKey(_ node: LoupeNode) -> String {
+    private static func suppressesDiffNode(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isSystemOwnedPassiveDecoration(node) {
+            return true
+        }
+        guard isRolelessAppleSystemChromeAggregate(node, in: snapshot),
+              isSemanticOnlyDisplayText(node),
+              let text = LoupeObservationCompactor.displayText(for: node) else {
+            return false
+        }
+        return hasSpecificVisibleTextMatch(
+            text,
+            excluding: node.ref,
+            in: snapshot,
+            screen: snapshot.screen.size
+        )
+    }
+
+    private static func isSystemOwnedPassiveDecoration(_ node: LoupeNode) -> Bool {
+        guard node.runtime?.frameworkBundleIdentifier?.hasPrefix("com.apple.") == true else {
+            return false
+        }
+        if node.testID != nil || node.role != nil || node.accessibility?.isElement == true {
+            return false
+        }
+        if node.isInteractive || isPublicInteractiveUIKitElement(node) {
+            return false
+        }
+        return LoupeObservationCompactor.displayText(for: node) == nil
+    }
+
+    private static func isPublicInteractiveUIKitElement(_ node: LoupeNode) -> Bool {
+        node.uiKit?.button != nil
+            || node.uiKit?.switchControl != nil
+            || node.uiKit?.slider != nil
+            || node.uiKit?.stepper != nil
+            || node.uiKit?.segmentedControl != nil
+            || node.uiKit?.textField != nil
+            || node.uiKit?.textView != nil
+            || node.kind == .barButtonItem
+            || node.kind == .tabBarItem
+    }
+
+    private static func nodeIdentityKey(_ node: LoupeNode, screen: LoupeSize) -> String {
         if let testID = node.testID, !testID.isEmpty {
             return "testID:\(testID)"
         }
@@ -3042,37 +3145,41 @@ struct LoupeCLI {
         }
         let type = node.uiKit?.className ?? node.typeName
         let role = node.role ?? ""
-        let text = displayText(node) ?? ""
         if let frame = node.frame {
+            if suppressesDiffAggregateText(node, screen: screen) {
+                return "visual:\(type):\(role):\(rectSummary(frame))"
+            }
+            let text = diffSummaryText(node, screen: screen) ?? ""
             return "visual:\(type):\(role):\(text):\(rectSummary(frame))"
         }
         return "ref:\(node.ref)"
     }
 
-    private static func diffNodeSummary(key: String, node: LoupeNode) -> LoupeNodeDiffSummary {
+    private static func diffNodeSummary(key: String, node: LoupeNode, screen: LoupeSize) -> LoupeNodeDiffSummary {
         LoupeNodeDiffSummary(
             key: key,
             ref: node.ref,
             typeName: node.uiKit?.className ?? node.typeName,
             role: node.role,
             testID: node.testID,
-            text: displayText(node),
-            frame: node.frame
+            text: diffSummaryText(node, screen: screen),
+            frame: node.frame,
+            isVisible: node.isVisible
         )
     }
 
-    private static func nodeSummary(_ node: LoupeNode) -> String {
+    private static func nodeSummary(_ node: LoupeNode, screen: LoupeSize) -> String {
         [
             node.uiKit?.className ?? node.typeName,
             node.testID.map { "#\($0)" },
-            displayText(node).map { "\"\($0)\"" },
+            diffSummaryText(node, screen: screen).map { "\"\(summaryPreview($0))\"" },
             node.frame.map(rectSummary),
         ].compactMap(\.self).joined(separator: " ")
     }
 
-    private static func changedFields(before: LoupeNode, after: LoupeNode) -> [LoupeNodeFieldChange] {
+    private static func changedFields(before: LoupeNode, after: LoupeNode, screen: LoupeSize) -> [LoupeNodeFieldChange] {
         var changes: [LoupeNodeFieldChange] = []
-        appendChange("text", displayText(before), displayText(after), to: &changes)
+        appendChange("text", diffSummaryText(before, screen: screen), diffSummaryText(after, screen: screen), to: &changes)
         appendChange("value", before.value, after.value, to: &changes)
         appendChange("isVisible", before.isVisible, after.isVisible, to: &changes)
         appendChange("isEnabled", before.isEnabled, after.isEnabled, to: &changes)
@@ -3110,6 +3217,107 @@ struct LoupeCLI {
         return changes
     }
 
+    private static func diffSummaryText(_ node: LoupeNode, screen: LoupeSize) -> String? {
+        guard !suppressesDiffAggregateText(node, screen: screen) else {
+            return nil
+        }
+        return displayText(node)
+    }
+
+    private static func suppressesDiffAggregateText(_ node: LoupeNode, screen: LoupeSize) -> Bool {
+        if node.uiKit?.scrollView != nil {
+            return true
+        }
+
+        switch node.role?.lowercased() {
+        case "collectionview", "tableview", "scrollview", "window", "navigationbar":
+            return true
+        default:
+            break
+        }
+
+        guard node.testID == nil, node.role == nil, !node.children.isEmpty, let frame = node.frame else {
+            return false
+        }
+
+        let screenArea = max(0, screen.width) * max(0, screen.height)
+        guard screenArea > 0 else {
+            return false
+        }
+        return max(0, frame.width) * max(0, frame.height) / screenArea >= 0.5
+    }
+
+    private static func isRolelessAppleSystemChromeAggregate(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        guard node.runtime?.frameworkBundleIdentifier?.hasPrefix("com.apple.") == true,
+              node.testID == nil,
+              node.role == nil,
+              node.accessibility?.isElement != true else {
+            return false
+        }
+        return isSystemChromeDescendant(node, in: snapshot)
+    }
+
+    private static func isSystemChromeDescendant(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isSystemChromeRole(node.role) {
+            return true
+        }
+        var currentRef = node.parentRef
+        while let ref = currentRef, let current = snapshot.nodes[ref] {
+            if isSystemChromeRole(current.role) {
+                return true
+            }
+            currentRef = current.parentRef
+        }
+        return false
+    }
+
+    private static func isSystemChromeRole(_ role: String?) -> Bool {
+        role == "navigationBar" || role == "tabBar" || role == "toolbar"
+    }
+
+    private static func isSemanticOnlyDisplayText(_ node: LoupeNode) -> Bool {
+        nonEmpty(node.semanticText) != nil
+            && nonEmpty(node.text) == nil
+            && nonEmpty(node.renderedText) == nil
+            && nonEmpty(node.label) == nil
+            && nonEmpty(node.value) == nil
+            && nonEmpty(node.placeholder) == nil
+    }
+
+    private static func hasSpecificVisibleTextMatch(
+        _ text: String,
+        excluding ref: String,
+        in snapshot: LoupeSnapshot,
+        screen: LoupeSize
+    ) -> Bool {
+        let screenRect = LoupeRect(x: 0, y: 0, width: screen.width, height: screen.height)
+        return snapshot.nodes.values.contains { candidate in
+            guard candidate.ref != ref,
+                  candidate.isVisible,
+                  let frame = candidate.frame,
+                  frame.intersects(screenRect),
+                  LoupeObservationCompactor.displayText(for: candidate) == text else {
+                return false
+            }
+            return isSpecificTextNode(candidate)
+        }
+    }
+
+    private static func isSpecificTextNode(_ node: LoupeNode) -> Bool {
+        node.testID != nil
+            || node.role != nil
+            || node.accessibility?.isElement == true
+            || !isSemanticOnlyDisplayText(node)
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
     private static func appendChange<T: Equatable>(
         _ field: String,
         _ before: T?,
@@ -3144,15 +3352,29 @@ struct LoupeCLI {
         "\(format(insets.top)),\(format(insets.left)),\(format(insets.bottom)),\(format(insets.right))"
     }
 
-    private static func renderSnapshotDiff(_ diff: LoupeSnapshotDiff, limit: Int, changedOnly: Bool = false) -> String {
+    private static func renderSnapshotDiff(
+        _ diff: LoupeSnapshotDiff,
+        limit: Int,
+        changedOnly: Bool = false,
+        visibleOnly: Bool = false
+    ) -> String {
+        let appeared = visibleOnly ? diff.appeared.filter(\.isVisibleForSummary) : diff.appeared
+        let disappeared = visibleOnly ? diff.disappeared.filter(\.isVisibleForSummary) : diff.disappeared
         var lines: [String] = [
             "diff \(diff.beforeSnapshotID) -> \(diff.afterSnapshotID)",
-            "appeared=\(diff.appeared.count) disappeared=\(diff.disappeared.count) changed=\(diff.changed.count)",
+            "appeared=\(appeared.count) disappeared=\(disappeared.count) changed=\(diff.changed.count)",
         ]
+        if visibleOnly {
+            let skippedAppeared = diff.appeared.count - appeared.count
+            let skippedDisappeared = diff.disappeared.count - disappeared.count
+            if skippedAppeared > 0 || skippedDisappeared > 0 {
+                lines.append("hiddenSkipped appeared=\(skippedAppeared) disappeared=\(skippedDisappeared)")
+            }
+        }
 
         if !changedOnly {
-            appendSection("appeared", diff.appeared.prefix(limit).map(renderDiffNode), to: &lines)
-            appendSection("disappeared", diff.disappeared.prefix(limit).map(renderDiffNode), to: &lines)
+            appendSection("appeared", appeared.prefix(limit).map(renderDiffNode), to: &lines)
+            appendSection("disappeared", disappeared.prefix(limit).map(renderDiffNode), to: &lines)
         }
         appendSection("changed", diff.changed.prefix(limit).map(renderNodeChange), to: &lines)
         return lines.joined(separator: "\n")
@@ -3170,20 +3392,32 @@ struct LoupeCLI {
 
     private static func renderDiffNode(_ node: LoupeNodeDiffSummary) -> String {
         [
-            node.key,
+            summaryPreview(node.key, maxLength: 180),
             node.typeName,
             node.role.map { "role=\($0)" },
             node.testID.map { "testID=\($0)" },
-            node.text.map { "text=\"\($0)\"" },
+            node.text.map { "text=\"\(summaryPreview($0))\"" },
             node.frame.map { "frame=\(rectSummary($0))" },
+            node.isVisible == false ? "visible=false" : nil,
         ].compactMap(\.self).joined(separator: " ")
     }
 
     private static func renderNodeChange(_ change: LoupeNodeChange) -> String {
         let fields = change.changes
-            .map { "\($0.field):\($0.before ?? "nil")->\($0.after ?? "nil")" }
+            .map { "\($0.field):\(summaryPreview($0.before ?? "nil"))->\(summaryPreview($0.after ?? "nil"))" }
             .joined(separator: ", ")
-        return "\(change.key) \(change.summary) \(fields)"
+        return "\(summaryPreview(change.key, maxLength: 180)) \(change.summary) \(fields)"
+    }
+
+    private static func summaryPreview(_ text: String, maxLength: Int = 140) -> String {
+        let oneLine = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        guard oneLine.count > maxLength else {
+            return oneLine
+        }
+        let end = oneLine.index(oneLine.startIndex, offsetBy: maxLength)
+        return "\(oneLine[..<end])..."
     }
 
     private static func makeTraceSummary(directory: URL) throws -> LoupeTraceSummary {
@@ -3216,6 +3450,7 @@ struct LoupeCLI {
             diff = nil
         }
 
+        let screenshotDiff = try? screenshotDiffIfPresent(in: directory)
         let cropURL = directory.appendingPathComponent("target-crop.png")
         return LoupeTraceSummary(
             directory: directory.path,
@@ -3225,11 +3460,49 @@ struct LoupeCLI {
             target: afterAction?.resolvedTarget ?? failureAction?.resolvedTarget ?? targetAction?.resolvedTarget,
             error: error?.message,
             diff: diff,
+            screenshotDiff: screenshotDiff,
+            notes: traceNotes(diff: diff, screenshotDiff: screenshotDiff),
             batchMutation: batchMutation,
             newLogs: newLogs,
             failureLogs: failureLogs,
             targetCropPath: FileManager.default.fileExists(atPath: cropURL.path) ? cropURL.path : nil
         )
+    }
+
+    private static func screenshotDiffIfPresent(in directory: URL) throws -> LoupeScreenshotDiffSummary? {
+        let beforeURL = directory.appendingPathComponent("before.png")
+        let afterURL = directory.appendingPathComponent("after.png")
+        guard
+            FileManager.default.fileExists(atPath: beforeURL.path),
+            FileManager.default.fileExists(atPath: afterURL.path)
+        else {
+            return nil
+        }
+        return try ScreenshotDiffer.diff(before: beforeURL, after: afterURL)
+    }
+
+    static func traceNotes(
+        diff: LoupeSnapshotDiff?,
+        screenshotDiff: LoupeScreenshotDiffSummary?
+    ) -> [String] {
+        guard let screenshotDiff, screenshotDiff.changedPixelRatio >= 0.20 else {
+            return []
+        }
+
+        let snapshotChangeCount = diff.map(visibleSnapshotChangeCount) ?? 0
+        guard snapshotChangeCount <= 5 else {
+            return []
+        }
+
+        return [
+            "large screenshot change with minimal app snapshot diff; likely system alert, simulator chrome, or external overlay outside the injected app tree",
+        ]
+    }
+
+    private static func visibleSnapshotChangeCount(_ diff: LoupeSnapshotDiff) -> Int {
+        diff.appeared.filter(\.isVisibleForSummary).count
+            + diff.disappeared.filter(\.isVisibleForSummary).count
+            + diff.changed.count
     }
 
     private static func existingTraceFile(in directory: URL, names: [String]) -> URL? {
@@ -3261,13 +3534,25 @@ struct LoupeCLI {
         if let error = summary.error {
             lines.append("error=\(error)")
         }
+        if let screenshotDiff = summary.screenshotDiff {
+            lines.append(
+                "screenshotDiff changed=\(formatPercent(screenshotDiff.changedPixelRatio)) pixels=\(screenshotDiff.changedPixels)/\(screenshotDiff.comparedPixels) meanDelta=\(formatDecimal(screenshotDiff.meanColorDelta)) maxDelta=\(screenshotDiff.maxColorDelta)"
+            )
+            if !screenshotDiff.dimensionsMatch {
+                lines.append("screenshotSize before=\(screenshotDiff.beforeSize.width)x\(screenshotDiff.beforeSize.height) after=\(screenshotDiff.afterSize.width)x\(screenshotDiff.afterSize.height)")
+            }
+            lines.append("screenshots before=\(screenshotDiff.beforePath) after=\(screenshotDiff.afterPath)")
+        }
+        for note in summary.notes {
+            lines.append("note=\(note)")
+        }
         if let batchMutation = summary.batchMutation {
             lines.append("set-many matched=\(batchMutation.matchedTargets) mutations=\(batchMutation.mutationRequests) verified=\(batchMutation.verifiedTargets) accuracy=\(format(batchMutation.accuracy))")
             lines.append("artifacts prev=\(batchMutation.prevSnapshot) next=\(batchMutation.nextSnapshot) targets=\(batchMutation.targets)")
         }
         if let diff = summary.diff {
             lines.append("")
-            lines.append(renderSnapshotDiff(diff, limit: limit))
+            lines.append(renderSnapshotDiff(diff, limit: limit, visibleOnly: true))
         }
         let logs = summary.error == nil ? summary.newLogs : summary.failureLogs
         if !logs.isEmpty {
@@ -3278,6 +3563,14 @@ struct LoupeCLI {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func formatPercent(_ value: Double) -> String {
+        String(format: "%.2f%%", value * 100)
+    }
+
+    private static func formatDecimal(_ value: Double) -> String {
+        String(format: "%.3f", value)
     }
 
     private static func renderBatchMutationSummary(_ result: BatchMutationResult) -> String {
@@ -3810,7 +4103,7 @@ struct LoupeCLI {
                 "showsHorizontalScrollIndicator",
             ]
         }
-        if node.uiKit?.stackView != nil || (node.uiKit?.className ?? node.typeName) == "UIStackView" {
+        if node.uiKit?.stackView != nil {
             properties += [
                 "stack.axis", "stack.alignment", "stack.distribution", "stack.spacing",
                 "stack.layoutMarginsRelativeArrangement",
@@ -3906,7 +4199,6 @@ struct LoupeCLI {
             || node.uiKit?.button != nil
             || node.uiKit?.textField != nil
             || node.uiKit?.textView != nil
-            || ["UILabel", "UIButton", "UITextField", "UITextView"].contains(node.uiKit?.className ?? node.typeName)
     }
 
     private static func renderNodeMutationCapabilities(_ node: LoupeNode) -> String {
@@ -3953,13 +4245,17 @@ struct LoupeCLI {
         return current
     }
 
-    private static func valueMatches(_ value: Any, expected: String) -> Bool {
+    static func valueMatches(_ value: Any, expected: String) -> Bool {
         if let bool = value as? Bool {
             return bool == (expected as NSString).boolValue
         }
         if let number = value as? NSNumber {
             if expected == "true" || expected == "false" {
                 return number.boolValue == (expected as NSString).boolValue
+            }
+            if let expectedNumber = Double(expected),
+               numericValuesMatch(number.doubleValue, expected: expectedNumber) {
+                return true
             }
             return format(number.doubleValue) == expected || String(number.intValue) == expected
         }
@@ -3969,15 +4265,22 @@ struct LoupeCLI {
         return String(describing: value) == expected
     }
 
-    private static func mutationReflection(
+    private static func numericValuesMatch(_ actual: Double, expected: Double) -> Bool {
+        guard actual.isFinite, expected.isFinite else {
+            return actual == expected
+        }
+        let tolerance = max(1e-6, abs(expected) * 1e-6)
+        return abs(actual - expected) <= tolerance
+    }
+
+    static func mutationReflection(
         _ response: LoupeMutationResponse,
         sourceRoot: URL
     ) -> LoupeMutationReflection {
         let testID = response.after.testID ?? response.target.testID ?? mutationSelectorTestID(response.selector)
         let hierarchy = response.hierarchy ?? mutationHierarchyContext(response)
-        let candidates = testID.map {
-            sourceCandidates(matching: $0, under: sourceRoot)
-        } ?? []
+        let sourceTerms = mutationSourceTerms(response: response, hierarchy: hierarchy, testID: testID)
+        let candidates = sourceCandidates(matchingAny: sourceTerms, under: sourceRoot)
         return LoupeMutationReflection(
             selector: response.selector,
             property: response.property,
@@ -3996,7 +4299,44 @@ struct LoupeCLI {
         selector.kind == .testID ? selector.value : nil
     }
 
-    private static func sourceCandidates(matching testID: String, under sourceRoot: URL) -> [LoupeMutationSourceCandidate] {
+    private static func mutationSourceTerms(
+        response: LoupeMutationResponse,
+        hierarchy: LoupeMutationHierarchyContext,
+        testID: String?
+    ) -> [String] {
+        var terms: [String] = []
+        appendSourceTerm(testID, to: &terms)
+        if response.property == "text", let beforeText = response.before.text, !beforeText.isEmpty {
+            appendSourceTerm(beforeText, to: &terms)
+        }
+        appendSourceTerm(response.after.uiKit?.className, to: &terms)
+        appendSourceTerm(response.after.typeName, to: &terms)
+        appendSourceTerm(hierarchy.target.typeName, to: &terms)
+        appendSourceTerm(hierarchy.parent?.typeName, to: &terms)
+        for child in hierarchy.children {
+            appendSourceTerm(child.typeName, to: &terms)
+        }
+        return terms
+    }
+
+    private static func appendSourceTerm(_ term: String?, to terms: inout [String]) {
+        guard let term, isUsefulSourceTerm(term), !terms.contains(term) else {
+            return
+        }
+        terms.append(term)
+    }
+
+    private static func isUsefulSourceTerm(_ term: String) -> Bool {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 3 else {
+            return false
+        }
+        return true
+    }
+
+    private static func sourceCandidates(matchingAny terms: [String], under sourceRoot: URL) -> [LoupeMutationSourceCandidate] {
+        let terms = terms.filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return [] }
         guard let enumerator = FileManager.default.enumerator(
             at: sourceRoot,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -4014,7 +4354,7 @@ struct LoupeCLI {
                 continue
             }
             for (offset, line) in text.components(separatedBy: .newlines).enumerated()
-                where line.contains(testID) {
+                where terms.contains(where: { line.contains($0) }) {
                 candidates.append(
                     LoupeMutationSourceCandidate(
                         path: url.path,
@@ -4025,7 +4365,10 @@ struct LoupeCLI {
             }
         }
 
-        return candidates.sorted {
+        let uniqueCandidates = Dictionary(grouping: candidates, by: { "\($0.path):\($0.line)" })
+            .values
+            .compactMap(\.first)
+        return uniqueCandidates.sorted {
             if $0.path != $1.path { return $0.path < $1.path }
             return $0.line < $1.line
         }

@@ -18,6 +18,7 @@ int LoupeHIDDrag(
     char **errorMessage
 );
 int LoupeHIDType(const char *udid, const char *text, char **errorMessage);
+int LoupeHIDPaste(const char *udid, char **errorMessage);
 void LoupeHIDFreeCString(char *string);
 
 #ifdef __cplusplus

@@ -108,9 +108,9 @@ struct ConstraintMutationOptions {
 
     static func usage(deactivate: Bool) -> String {
         if deactivate {
-            return "Usage: loupe deactivate-constraint --id <constraint-id> [--host <url>]"
+            return "Usage: loupe deactivate-constraint --id <constraint-id> [--host <url>] [--output <path>]"
         }
-        return "Usage: loupe set-constraint --id <constraint-id> constant <value> [priority <value>] [active true|false]"
+        return "Usage: loupe set-constraint --id <constraint-id> constant <value> [priority <value>] [active true|false] [--host <url>] [--output <path>]"
     }
 
     private static func value(after option: String, in arguments: [String], index: inout Int) throws -> String {

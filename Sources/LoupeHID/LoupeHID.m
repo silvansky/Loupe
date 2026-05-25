@@ -419,3 +419,23 @@ int LoupeHIDType(const char *udid, const char *text, char **errorMessage)
         return 0;
     }
 }
+
+int LoupeHIDPaste(const char *udid, char **errorMessage)
+{
+    @autoreleasepool {
+        id client = nil;
+        LoupeHIDFunctions functions;
+        if (!LoupeHIDPrepare([NSString stringWithUTF8String:udid], &client, &functions, errorMessage)) {
+            return 1;
+        }
+
+        static uint32_t const LoupeHIDKeyLeftCommand = 227;
+        static uint32_t const LoupeHIDKeyV = 25;
+        LoupeHIDSendKey(client, functions.keyboardMessage, LoupeHIDKeyLeftCommand, LoupeHIDDirectionDown);
+        LoupeHIDSendKey(client, functions.keyboardMessage, LoupeHIDKeyV, LoupeHIDDirectionDown);
+        LoupeHIDSendKey(client, functions.keyboardMessage, LoupeHIDKeyV, LoupeHIDDirectionUp);
+        LoupeHIDSendKey(client, functions.keyboardMessage, LoupeHIDKeyLeftCommand, LoupeHIDDirectionUp);
+        usleep(25 * 1000);
+        return 0;
+    }
+}

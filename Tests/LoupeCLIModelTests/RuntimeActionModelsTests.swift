@@ -38,6 +38,33 @@ struct RuntimeActionModelsTests {
         #expect(options.verifyScroll == false)
     }
 
+    @Test func expectVisibleBareValueDefaultsToTestID() throws {
+        let options = try ActionOptions(
+            command: "tap",
+            arguments: [
+                "--ref", "n21",
+                "--expect-visible", "screen.ready",
+            ]
+        )
+
+        #expect(options.expectVisibleTestID == "screen.ready")
+        #expect(options.expectVisibleSelector == .testID("screen.ready"))
+    }
+
+    @Test func expectVisibleCanMatchTextWithoutChangingTapSelector() throws {
+        let options = try ActionOptions(
+            command: "tap",
+            arguments: [
+                "--ref", "n21",
+                "--expect-visible", "text:Send",
+            ]
+        )
+
+        #expect(options.selector == .ref("n21"))
+        #expect(options.expectVisibleTestID == nil)
+        #expect(options.expectVisibleSelector == .text("Send", exact: false))
+    }
+
     @Test func refTapCanResolveAgainstProvidedSnapshot() throws {
         let options = try ActionOptions(
             command: "tap",

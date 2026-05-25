@@ -19,6 +19,7 @@ package struct ActionOptions: ActionDispatchOptions {
     package var endSpread: Double?
     package var traceDirectory: URL?
     package var expectVisibleTestID: String?
+    package var expectVisibleSelector: LoupeSelector?
     package var verifyScroll: Bool
 
     package init(command: String, arguments: [String]) throws {
@@ -40,6 +41,7 @@ package struct ActionOptions: ActionDispatchOptions {
         var endSpread: Double?
         var traceDirectory: URL?
         var expectVisibleTestID: String?
+        var expectVisibleSelector: LoupeSelector?
         var verifyScroll = true
         var screenWidth: Double?
         var screenHeight: Double?
@@ -112,7 +114,12 @@ package struct ActionOptions: ActionDispatchOptions {
             case "--trace-dir":
                 traceDirectory = URL(fileURLWithPath: try Self.value(after: argument, in: arguments, index: &index))
             case "--expect-visible":
-                expectVisibleTestID = try Self.value(after: argument, in: arguments, index: &index)
+                let raw = try Self.value(after: argument, in: arguments, index: &index)
+                let selector = Self.expectVisibleSelector(from: raw)
+                expectVisibleSelector = selector
+                if case let .testID(testID) = selector {
+                    expectVisibleTestID = testID
+                }
             case "--no-verify-scroll":
                 verifyScroll = false
             default:
@@ -155,6 +162,7 @@ package struct ActionOptions: ActionDispatchOptions {
         self.endSpread = endSpread
         self.traceDirectory = traceDirectory
         self.expectVisibleTestID = expectVisibleTestID
+        self.expectVisibleSelector = expectVisibleSelector
         self.verifyScroll = verifyScroll
     }
 
@@ -190,5 +198,33 @@ package struct ActionOptions: ActionDispatchOptions {
             throw CLIError("Invalid URL for \(option): \(raw)")
         }
         return url
+    }
+
+    private static func expectVisibleSelector(from raw: String) -> LoupeSelector {
+        guard let delimiter = raw.firstIndex(where: { $0 == ":" || $0 == "=" }) else {
+            return .testID(raw)
+        }
+
+        let key = raw[..<delimiter]
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+        let valueStart = raw.index(after: delimiter)
+        let value = String(raw[valueStart...])
+
+        switch key {
+        case "testid", "id":
+            return .testID(value)
+        case "ref":
+            return .ref(value)
+        case "role":
+            return .role(value)
+        case "text", "containstext":
+            return .text(value, exact: false)
+        case "exacttext":
+            return .text(value, exact: true)
+        default:
+            return .testID(raw)
+        }
     }
 }

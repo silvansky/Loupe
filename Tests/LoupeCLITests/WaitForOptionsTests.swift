@@ -1,4 +1,5 @@
 @testable import LoupeCLI
+import Foundation
 import Testing
 
 @Suite struct WaitForOptionsTests {
@@ -51,5 +52,11 @@ import Testing
         } catch {
             #expect(String(describing: error).contains("--key <path> --equals <value>"))
         }
+    }
+
+    @Test func valueMatchingAllowsFloatingPointSnapshotNoise() {
+        #expect(LoupeCLI.valueMatches(NSNumber(value: 0.800000011920929), expected: "0.8"))
+        #expect(LoupeCLI.valueMatches(NSNumber(value: 44.00000001), expected: "44"))
+        #expect(!LoupeCLI.valueMatches(NSNumber(value: 0.81), expected: "0.8"))
     }
 }
