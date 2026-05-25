@@ -52,10 +52,17 @@ public enum LoupeSnapshotQuery {
         in snapshot: LoupeSnapshot,
         options: LoupeQueryOptions = LoupeQueryOptions()
     ) -> [LoupeQueryResult] {
-        snapshot.nodes.values
+        let screenRect = LoupeRect(
+            x: 0,
+            y: 0,
+            width: snapshot.screen.size.width,
+            height: snapshot.screen.size.height
+        )
+        return snapshot.nodes.values
             .filter { matchesVisibilityAndState($0, options: options) }
             .filter { matches(selector, node: $0) }
-            .sorted(by: resultOrder)
+            .filter { !suppressesAggregateTextMatch($0, selector: selector, screenRect: screenRect, snapshot: snapshot) }
+            .sorted { resultOrder($0, $1, selector: selector) }
             .prefix(options.maxResults)
             .map(LoupeQueryResult.init)
     }
@@ -114,7 +121,17 @@ public enum LoupeSnapshotQuery {
         return displayText.localizedCaseInsensitiveContains(text)
     }
 
-    private static func resultOrder(_ lhs: LoupeNode, _ rhs: LoupeNode) -> Bool {
+    private static func resultOrder(_ lhs: LoupeNode, _ rhs: LoupeNode, selector: LoupeSelector) -> Bool {
+        let lhsTextRank = textSpecificityRank(lhs, selector: selector)
+        let rhsTextRank = textSpecificityRank(rhs, selector: selector)
+        if lhsTextRank != rhsTextRank {
+            return lhsTextRank < rhsTextRank
+        }
+
+        if (lhs.role != nil) != (rhs.role != nil) {
+            return lhs.role != nil
+        }
+
         if lhs.isInteractive != rhs.isInteractive {
             return lhs.isInteractive && !rhs.isInteractive
         }
@@ -127,6 +144,149 @@ public enum LoupeSnapshotQuery {
         }
 
         return lhsFrame.x < rhsFrame.x
+    }
+
+    private static func textSpecificityRank(_ node: LoupeNode, selector: LoupeSelector) -> Int {
+        guard let query = textQuery(from: selector),
+              let displayText = LoupeObservationCompactor.displayText(for: node) else {
+            return 0
+        }
+        if displayText.compare(query.text, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+            return 0
+        }
+        return displayText.count <= query.text.count + 12 ? 1 : 2
+    }
+
+    private static func textQuery(from selector: LoupeSelector) -> (text: String, exact: Bool)? {
+        switch selector {
+        case let .text(text, exact):
+            return (text, exact)
+        case let .roleAndText(_, text, exact):
+            return (text, exact)
+        default:
+            return nil
+        }
+    }
+
+    private static func suppressesAggregateTextMatch(
+        _ node: LoupeNode,
+        selector: LoupeSelector,
+        screenRect: LoupeRect,
+        snapshot: LoupeSnapshot
+    ) -> Bool {
+        guard case .text = selector else {
+            return false
+        }
+        guard node.testID == nil else {
+            return false
+        }
+        if suppressesSystemChromeSemanticDuplicateText(node, in: snapshot, screenRect: screenRect) {
+            return true
+        }
+        if node.uiKit?.scrollView != nil {
+            return true
+        }
+        switch node.role?.lowercased() {
+        case "collectionview", "tableview", "scrollview", "window", "navigationbar":
+            return true
+        default:
+            break
+        }
+        guard node.role == nil, !node.children.isEmpty, let frame = node.frame else {
+            return false
+        }
+        let screenArea = area(screenRect)
+        guard screenArea > 0 else {
+            return false
+        }
+        return area(frame) / screenArea >= 0.5
+    }
+
+    private static func suppressesSystemChromeSemanticDuplicateText(
+        _ node: LoupeNode,
+        in snapshot: LoupeSnapshot,
+        screenRect: LoupeRect
+    ) -> Bool {
+        guard isRolelessAppleSystemChromeAggregate(node, in: snapshot),
+              isSemanticOnlyDisplayText(node),
+              let text = LoupeObservationCompactor.displayText(for: node) else {
+            return false
+        }
+        return hasSpecificVisibleTextMatch(text, excluding: node.ref, in: snapshot, screenRect: screenRect)
+    }
+
+    private static func isRolelessAppleSystemChromeAggregate(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        guard node.runtime?.frameworkBundleIdentifier?.hasPrefix("com.apple.") == true,
+              node.testID == nil,
+              node.role == nil,
+              node.accessibility?.isElement != true else {
+            return false
+        }
+        return isSystemChromeDescendant(node, in: snapshot)
+    }
+
+    private static func isSystemChromeDescendant(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isSystemChromeRole(node.role) {
+            return true
+        }
+        var currentRef = node.parentRef
+        while let ref = currentRef, let current = snapshot.nodes[ref] {
+            if isSystemChromeRole(current.role) {
+                return true
+            }
+            currentRef = current.parentRef
+        }
+        return false
+    }
+
+    private static func isSystemChromeRole(_ role: String?) -> Bool {
+        role == "navigationBar" || role == "tabBar" || role == "toolbar"
+    }
+
+    private static func isSemanticOnlyDisplayText(_ node: LoupeNode) -> Bool {
+        nonEmpty(node.semanticText) != nil
+            && nonEmpty(node.text) == nil
+            && nonEmpty(node.renderedText) == nil
+            && nonEmpty(node.label) == nil
+            && nonEmpty(node.value) == nil
+            && nonEmpty(node.placeholder) == nil
+    }
+
+    private static func hasSpecificVisibleTextMatch(
+        _ text: String,
+        excluding ref: String,
+        in snapshot: LoupeSnapshot,
+        screenRect: LoupeRect
+    ) -> Bool {
+        snapshot.nodes.values.contains { candidate in
+            guard candidate.ref != ref,
+                  candidate.isVisible,
+                  let frame = candidate.frame,
+                  frame.intersects(screenRect),
+                  LoupeObservationCompactor.displayText(for: candidate) == text else {
+                return false
+            }
+            return isSpecificTextNode(candidate)
+        }
+    }
+
+    private static func isSpecificTextNode(_ node: LoupeNode) -> Bool {
+        node.testID != nil
+            || node.role != nil
+            || node.accessibility?.isElement == true
+            || !isSemanticOnlyDisplayText(node)
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func area(_ rect: LoupeRect) -> Double {
+        max(0, rect.width) * max(0, rect.height)
     }
 
     private static func stringMetadata(

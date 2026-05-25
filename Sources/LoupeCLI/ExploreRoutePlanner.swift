@@ -68,10 +68,6 @@ enum ExploreRoutePlanner {
     }
 
     private static func isExcluded(_ node: LoupeNode) -> Bool {
-        let typeName = node.typeName.lowercased()
-        if typeName.contains("scrollindicator") || typeName.contains("scrollbar") {
-            return true
-        }
         if ["application", "scene", "window", "scrollbar"].contains(node.role?.lowercased() ?? "") {
             return true
         }
@@ -147,4 +143,3 @@ enum ExploreRoutePlanner {
         return LoupePoint(x: frame.x + frame.width / 2, y: frame.y + frame.height / 2)
     }
 }
-

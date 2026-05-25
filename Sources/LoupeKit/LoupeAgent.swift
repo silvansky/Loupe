@@ -49,6 +49,8 @@ public extension UIView {
 
 @MainActor
 public final class LoupeAgent {
+    fileprivate static var mutatedConstraints: [String: NSLayoutConstraint] = [:]
+
     private var nextRef = 0
     private var nextNativeAccessibilityRef = 0
 
@@ -239,9 +241,10 @@ public final class LoupeAgent {
         guard request.constant != nil || request.priority != nil || request.isActive != nil else {
             throw LoupeMutationError(code: "missing_constraint_mutation", message: "Constraint mutation requires constant, priority, or isActive.")
         }
-        guard let constraint = runtimeConstraints().first(where: { constraintID($0) == request.id }) else {
+        guard let constraint = runtimeConstraint(matching: request.id) else {
             throw LoupeMutationError(status: 404, code: "constraint_not_found", message: "No runtime constraint matched id \(request.id).")
         }
+        Self.mutatedConstraints[request.id] = constraint
 
         let before = layoutConstraintProperties(constraint)
         if let constant = request.constant {
@@ -262,6 +265,7 @@ public final class LoupeAgent {
         }
 
         let after = layoutConstraintProperties(constraint)
+        Self.mutatedConstraints[request.id] = constraint
         let changed = constraintMutationMatches(request, after)
         let warning = changed ? nil : "Constraint mutation applied, but the effective constraint does not match the requested value. A layout owner may have restored it."
         let snapshot = captureSnapshot()
@@ -971,8 +975,12 @@ private func mutationValuesApproximatelyEqual(_ requested: LoupeMutationValue, _
         return lhs == rhs
     case let (.int(lhs), .int(rhs)):
         return lhs == rhs
+    case let (.int(lhs), .double(rhs)):
+        return numericValuesApproximatelyEqual(Double(lhs), rhs)
+    case let (.double(lhs), .int(rhs)):
+        return numericValuesApproximatelyEqual(lhs, Double(rhs))
     case let (.double(lhs), .double(rhs)):
-        return abs(lhs - rhs) < 0.5
+        return numericValuesApproximatelyEqual(lhs, rhs)
     case let (.string(lhs), .string(rhs)):
         return lhs == rhs
     case let (.color(lhs), .color(rhs)):
@@ -992,6 +1000,14 @@ private func mutationValuesApproximatelyEqual(_ requested: LoupeMutationValue, _
     default:
         return false
     }
+}
+
+private func numericValuesApproximatelyEqual(_ lhs: Double, _ rhs: Double) -> Bool {
+    guard lhs.isFinite, rhs.isFinite else {
+        return lhs == rhs
+    }
+    let tolerance = max(1e-6, abs(lhs) * 1e-6, abs(rhs) * 1e-6)
+    return abs(lhs - rhs) <= tolerance
 }
 
 private struct LoupeMutationDescriptor {
@@ -2183,6 +2199,7 @@ private func activationPoint(for view: UIView) -> LoupePoint? {
 private func uiKitProperties(for view: UIView) -> LoupeUIKitProperties {
     LoupeUIKitProperties(
         viewController: owningViewControllerName(for: view),
+        viewControllerRole: owningViewControllerRole(for: view),
         className: typeName(of: view),
         tag: view.tag,
         alpha: finiteDouble(view.alpha.doubleValue) ?? 0,
@@ -2279,6 +2296,14 @@ private func constraintID(_ constraint: NSLayoutConstraint) -> String {
         .replacingOccurrences(of: "ObjectIdentifier(", with: "")
         .replacingOccurrences(of: ")", with: "")
     return "c\(value)"
+}
+
+@MainActor
+private func runtimeConstraint(matching id: String) -> NSLayoutConstraint? {
+    if let constraint = runtimeConstraints().first(where: { constraintID($0) == id }) {
+        return constraint
+    }
+    return LoupeAgent.mutatedConstraints[id]
 }
 
 @MainActor
@@ -2608,7 +2633,7 @@ private func syntheticBarButtonNode(
     return LoupeNode(
         ref: ref,
         parentRef: parentRef,
-        kind: .view,
+        kind: .barButtonItem,
         typeName: "UIBarButtonItem",
         role: "button",
         testID: item.accessibilityIdentifier,
@@ -2629,6 +2654,8 @@ private func syntheticBarButtonNode(
             activationPoint: frame.map { LoupePoint(x: $0.x + $0.width / 2, y: $0.y + $0.height / 2) },
             isElement: true
         ),
+        runtime: matchedView.map(runtimeProperties(for:))
+            ?? LoupeNodeRuntimeProperties(frameworkBundleIdentifier: "com.apple.UIKitCore"),
         uiKit: LoupeUIKitProperties(
             className: className,
             tag: matchedView?.tag ?? 0,
@@ -2674,7 +2701,7 @@ private func syntheticTabBarItemNode(
     return LoupeNode(
         ref: ref,
         parentRef: parentRef,
-        kind: .view,
+        kind: .tabBarItem,
         typeName: "UITabBarItem",
         role: "button",
         testID: item.accessibilityIdentifier,
@@ -2695,6 +2722,8 @@ private func syntheticTabBarItemNode(
             activationPoint: frame.map { LoupePoint(x: $0.x + $0.width / 2, y: $0.y + $0.height / 2) },
             isElement: true
         ),
+        runtime: matchedView.map(runtimeProperties(for:))
+            ?? LoupeNodeRuntimeProperties(frameworkBundleIdentifier: "com.apple.UIKitCore"),
         uiKit: LoupeUIKitProperties(
             className: className,
             tag: matchedView?.tag ?? item.tag,
@@ -2734,16 +2763,14 @@ private func matchedBarButtonView(
         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
 
-    guard !searchableTexts.isEmpty else {
-        return nil
-    }
-
-    for candidate in candidates where !consumedCandidateIDs.contains(ObjectIdentifier(candidate)) {
-        let text = descendantText(in: candidate)
-        let identifier = candidate.accessibilityIdentifier ?? ""
-        if searchableTexts.contains(where: { text.contains($0) || identifier == $0 }) {
-            consumedCandidateIDs.insert(ObjectIdentifier(candidate))
-            return candidate
+    if !searchableTexts.isEmpty {
+        for candidate in candidates where !consumedCandidateIDs.contains(ObjectIdentifier(candidate)) {
+            let text = descendantText(in: candidate)
+            let identifier = candidate.accessibilityIdentifier ?? ""
+            if searchableTexts.contains(where: { text.contains($0) || identifier == $0 }) {
+                consumedCandidateIDs.insert(ObjectIdentifier(candidate))
+                return candidate
+            }
         }
     }
 
@@ -2877,10 +2904,28 @@ private func descendantText(in view: UIView) -> String {
 
 @MainActor
 private func owningViewControllerName(for view: UIView) -> String? {
+    owningViewController(for: view).map(typeName(of:))
+}
+
+@MainActor
+private func owningViewControllerRole(for view: UIView) -> String? {
+    guard let viewController = owningViewController(for: view) else {
+        return nil
+    }
+    if viewController is UIAlertController { return "alert" }
+    if viewController is UINavigationController { return "navigationController" }
+    if viewController is UITabBarController { return "tabBarController" }
+    if viewController is UISplitViewController { return "splitViewController" }
+    if viewController is UIPageViewController { return "pageViewController" }
+    return nil
+}
+
+@MainActor
+private func owningViewController(for view: UIView) -> UIViewController? {
     var responder: UIResponder? = view.next
     while let current = responder {
         if let viewController = current as? UIViewController {
-            return typeName(of: viewController)
+            return viewController
         }
         responder = current.next
     }

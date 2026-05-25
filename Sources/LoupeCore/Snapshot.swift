@@ -5,6 +5,8 @@ public enum LoupeNodeKind: String, Codable, Equatable {
     case scene
     case window
     case view
+    case barButtonItem
+    case tabBarItem
 }
 
 public struct LoupeStyle: Codable, Equatable {
@@ -451,6 +453,7 @@ public struct LoupeUIStackViewProperties: Codable, Equatable {
 
 public struct LoupeUIKitProperties: Codable, Equatable {
     public var viewController: String?
+    public var viewControllerRole: String?
     public var className: String
     public var tag: Int
     public var alpha: Double
@@ -485,6 +488,7 @@ public struct LoupeUIKitProperties: Codable, Equatable {
 
     public init(
         viewController: String? = nil,
+        viewControllerRole: String? = nil,
         className: String,
         tag: Int,
         alpha: Double,
@@ -518,6 +522,7 @@ public struct LoupeUIKitProperties: Codable, Equatable {
         webView: LoupeWKWebViewProperties? = nil
     ) {
         self.viewController = viewController
+        self.viewControllerRole = viewControllerRole
         self.className = className
         self.tag = tag
         self.alpha = alpha

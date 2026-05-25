@@ -52,17 +52,23 @@ public struct LoupeLayoutIssue: Codable, Equatable {
 public struct LoupeLayoutAuditOptions: Equatable {
     public var tolerance: Double
     public var minOverlapArea: Double
+    public var minOverlapRatio: Double
+    public var minContainmentOverflowRatio: Double
     public var minTouchTarget: Double
     public var minContrastRatio: Double
 
     public init(
         tolerance: Double = 1,
         minOverlapArea: Double = 16,
+        minOverlapRatio: Double = 0.2,
+        minContainmentOverflowRatio: Double = 0.1,
         minTouchTarget: Double = 44,
         minContrastRatio: Double = 4.5
     ) {
         self.tolerance = tolerance
         self.minOverlapArea = minOverlapArea
+        self.minOverlapRatio = minOverlapRatio
+        self.minContainmentOverflowRatio = minContainmentOverflowRatio
         self.minTouchTarget = minTouchTarget
         self.minContrastRatio = minContrastRatio
     }
@@ -86,19 +92,44 @@ public enum LoupeLayoutAuditor {
         options: LoupeLayoutAuditOptions = LoupeLayoutAuditOptions()
     ) -> LoupeLayoutAudit {
         var issues: [LoupeLayoutIssue] = []
-        issues.append(contentsOf: duplicateTestIDIssues(in: snapshot))
-        issues.append(contentsOf: interactiveIssues(in: snapshot, options: options))
-        issues.append(contentsOf: contrastIssues(in: snapshot, options: options))
+        let screenFrame = LoupeRect(
+            x: 0,
+            y: 0,
+            width: snapshot.screen.size.width,
+            height: snapshot.screen.size.height
+        )
+        let activeModalOverlayRefs = activeModalOverlayRefs(in: snapshot, screenFrame: screenFrame)
+        issues.append(contentsOf: duplicateTestIDIssues(in: snapshot, screenFrame: screenFrame))
+        issues.append(contentsOf: interactiveIssues(
+            in: snapshot,
+            screenFrame: screenFrame,
+            activeModalOverlayRefs: activeModalOverlayRefs,
+            options: options
+        ))
+        issues.append(contentsOf: contrastIssues(
+            in: snapshot,
+            screenFrame: screenFrame,
+            activeModalOverlayRefs: activeModalOverlayRefs,
+            options: options
+        ))
 
         for parent in snapshot.nodes.values {
             let visibleChildren = parent.children
                 .compactMap { snapshot.nodes[$0] }
-                .filter { $0.isVisible && $0.frame != nil }
+                .filter { $0.isVisible && $0.frame != nil && intersectsScreen($0, screenFrame: screenFrame) }
 
             if let parentFrame = parent.frame {
                 for child in visibleChildren {
                     guard let childFrame = child.frame else { continue }
-                    if !parentFrame.contains(childFrame, tolerance: options.tolerance) {
+                    guard shouldAuditContainment(parent: parent, child: child, screenFrame: screenFrame) else { continue }
+                    guard
+                        let clippedParentFrame = clipped(parentFrame, to: screenFrame),
+                        let clippedChildFrame = clipped(childFrame, to: screenFrame)
+                    else {
+                        continue
+                    }
+                    if containmentOverflowRatio(parent: clippedParentFrame, child: clippedChildFrame, tolerance: options.tolerance)
+                        > options.minContainmentOverflowRatio {
                         issues.append(
                             LoupeLayoutIssue(
                                 kind: .childOutsideParent,
@@ -120,10 +151,23 @@ public enum LoupeLayoutAuditor {
                     let first = visibleChildren[index]
                     let second = visibleChildren[otherIndex]
                     guard let firstFrame = first.frame, let secondFrame = second.frame else { continue }
-                    guard shouldAuditSiblingOverlap(first, second) else { continue }
+                    guard shouldAuditSiblingOverlap(
+                        first,
+                        second,
+                        parent: parent,
+                        snapshot: snapshot,
+                        screenFrame: screenFrame
+                    ) else { continue }
+                    guard
+                        let clippedFirstFrame = clipped(firstFrame, to: screenFrame),
+                        let clippedSecondFrame = clipped(secondFrame, to: screenFrame)
+                    else {
+                        continue
+                    }
 
-                    let overlapArea = firstFrame.intersectionArea(with: secondFrame)
-                    if overlapArea >= options.minOverlapArea {
+                    let overlapArea = clippedFirstFrame.intersectionArea(with: clippedSecondFrame)
+                    if overlapArea >= options.minOverlapArea,
+                       overlapRatio(clippedFirstFrame, clippedSecondFrame, overlapArea: overlapArea) >= options.minOverlapRatio {
                         issues.append(
                             LoupeLayoutIssue(
                                 kind: .overlappingSiblings,
@@ -145,9 +189,10 @@ public enum LoupeLayoutAuditor {
         return LoupeLayoutAudit(snapshotID: snapshot.id, issues: issues)
     }
 
-    private static func duplicateTestIDIssues(in snapshot: LoupeSnapshot) -> [LoupeLayoutIssue] {
+    private static func duplicateTestIDIssues(in snapshot: LoupeSnapshot, screenFrame: LoupeRect) -> [LoupeLayoutIssue] {
         let groups = Dictionary(grouping: snapshot.nodes.values.compactMap { node -> (String, LoupeNode)? in
             guard let testID = node.testID, !testID.isEmpty else { return nil }
+            guard node.isVisible, intersectsScreen(node, screenFrame: screenFrame) else { return nil }
             guard shouldAuditDuplicateTestID(node) else { return nil }
             return (testID, node)
         }, by: { $0.0 })
@@ -155,6 +200,7 @@ public enum LoupeLayoutAuditor {
         return groups.values.flatMap { entries -> [LoupeLayoutIssue] in
             let nodes = entries.map(\.1)
             guard nodes.count > 1 else { return [] }
+            guard hasAmbiguousDuplicateTargets(nodes) else { return [] }
             return nodes.map { node in
                 LoupeLayoutIssue(
                     kind: .duplicateTestID,
@@ -168,6 +214,9 @@ public enum LoupeLayoutAuditor {
     }
 
     private static func shouldAuditDuplicateTestID(_ node: LoupeNode) -> Bool {
+        if isSystemGeneratedTestID(node.testID) {
+            return false
+        }
         if node.isInteractive { return true }
         if node.accessibility?.isElement == true { return true }
         if isImageNode(node) {
@@ -176,11 +225,56 @@ public enum LoupeLayoutAuditor {
         return true
     }
 
-    private static func shouldAuditSiblingOverlap(_ first: LoupeNode, _ second: LoupeNode) -> Bool {
+    private static func shouldAuditSiblingOverlap(
+        _ first: LoupeNode,
+        _ second: LoupeNode,
+        parent: LoupeNode,
+        snapshot: LoupeSnapshot,
+        screenFrame: LoupeRect
+    ) -> Bool {
         guard !isDecorativeImageNode(first), !isDecorativeImageNode(second) else {
             return false
         }
+        guard !isIntentionalOverlayOverlapPair(first, second, snapshot: snapshot, screenFrame: screenFrame) else {
+            return false
+        }
+        guard !isSystemChromeDescendant(parent, in: snapshot) else {
+            return false
+        }
+        guard !hasHorizontallyDisplacedCellAncestor(parent, in: snapshot, screenFrame: screenFrame) else {
+            return false
+        }
+        guard !isSystemChromeOverlapPair(first, second) else {
+            return false
+        }
+        guard !isSystemOwnedAggregateContainer(first, screenFrame: screenFrame),
+              !isSystemOwnedAggregateContainer(second, screenFrame: screenFrame) else {
+            return false
+        }
+        guard !isScrollInsetReservedOverlap(first, second, screenFrame: screenFrame) else {
+            return false
+        }
         return isOverlapAuditCandidate(first) && isOverlapAuditCandidate(second)
+    }
+
+    private static func shouldAuditContainment(parent: LoupeNode, child: LoupeNode, screenFrame: LoupeRect) -> Bool {
+        if isSystemOwnedImplementationDetail(child) {
+            return false
+        }
+        if isSystemChromeContainmentNode(parent) || isSystemChromeContainmentNode(child) {
+            return false
+        }
+        if isSystemOwnedAggregateContainer(parent, screenFrame: screenFrame)
+            || isSystemOwnedAggregateContainer(child, screenFrame: screenFrame) {
+            return false
+        }
+        if parent.role == "cell", isHorizontallyPartiallyOffscreen(parent, screenFrame: screenFrame) {
+            return false
+        }
+        if isScrollContainer(parent) {
+            return false
+        }
+        return true
     }
 
     private static func isOverlapAuditCandidate(_ node: LoupeNode) -> Bool {
@@ -198,21 +292,97 @@ public enum LoupeLayoutAuditor {
             && node.value == nil
     }
 
+    private static func isScrollInsetReservedOverlap(
+        _ first: LoupeNode,
+        _ second: LoupeNode,
+        screenFrame: LoupeRect
+    ) -> Bool {
+        if isScrollInsetReservedOverlap(scrollNode: first, overlayNode: second, screenFrame: screenFrame) {
+            return true
+        }
+        return isScrollInsetReservedOverlap(scrollNode: second, overlayNode: first, screenFrame: screenFrame)
+    }
+
+    private static func isScrollInsetReservedOverlap(
+        scrollNode: LoupeNode,
+        overlayNode: LoupeNode,
+        screenFrame: LoupeRect
+    ) -> Bool {
+        guard isScrollContainer(scrollNode),
+              let scrollView = scrollNode.uiKit?.scrollView,
+              let scrollFrame = scrollNode.frame,
+              let overlayFrame = overlayNode.frame,
+              let clippedScrollFrame = clipped(scrollFrame, to: screenFrame),
+              let clippedOverlayFrame = clipped(overlayFrame, to: screenFrame) else {
+            return false
+        }
+
+        guard let overlap = intersection(clippedScrollFrame, clippedOverlayFrame) else {
+            return false
+        }
+
+        let tolerance = 1.0
+        let horizontalCoverage = overlap.width / max(1, min(clippedScrollFrame.width, clippedOverlayFrame.width))
+        let verticalCoverage = overlap.height / max(1, min(clippedScrollFrame.height, clippedOverlayFrame.height))
+
+        if horizontalCoverage >= 0.5 {
+            if clippedOverlayFrame.maxY >= clippedScrollFrame.maxY - tolerance,
+               overlap.height <= scrollView.adjustedContentInset.bottom + tolerance {
+                return true
+            }
+            if clippedOverlayFrame.y <= clippedScrollFrame.y + tolerance,
+               overlap.height <= scrollView.adjustedContentInset.top + tolerance {
+                return true
+            }
+        }
+
+        if verticalCoverage >= 0.5 {
+            if clippedOverlayFrame.maxX >= clippedScrollFrame.maxX - tolerance,
+               overlap.width <= scrollView.adjustedContentInset.right + tolerance {
+                return true
+            }
+            if clippedOverlayFrame.x <= clippedScrollFrame.x + tolerance,
+               overlap.width <= scrollView.adjustedContentInset.left + tolerance {
+                return true
+            }
+        }
+
+        return false
+    }
+
     private static func isImageNode(_ node: LoupeNode) -> Bool {
-        node.role == "image" || node.typeName == "UIImageView"
+        node.role == "image" || node.uiKit?.imageView != nil
+    }
+
+    private static func isScrollContainer(_ node: LoupeNode) -> Bool {
+        return node.role == "scrollView"
+            || node.role == "tableView"
+            || node.role == "collectionView"
+            || node.uiKit?.scrollView != nil
     }
 
     private static func interactiveIssues(
         in snapshot: LoupeSnapshot,
+        screenFrame: LoupeRect,
+        activeModalOverlayRefs: Set<String>,
         options: LoupeLayoutAuditOptions
     ) -> [LoupeLayoutIssue] {
         snapshot.nodes.values.flatMap { node -> [LoupeLayoutIssue] in
             guard node.isVisible, node.isInteractive, let frame = node.frame else {
                 return []
             }
+            guard intersectsScreen(node, screenFrame: screenFrame) else {
+                return []
+            }
+            guard shouldAuditNodeInModalContext(node, activeModalOverlayRefs: activeModalOverlayRefs, snapshot: snapshot) else {
+                return []
+            }
+            guard !isSystemChromeDescendant(node, in: snapshot) else {
+                return []
+            }
 
             var issues: [LoupeLayoutIssue] = []
-            if shouldRequireTestID(node), node.testID == nil {
+            if shouldRequireTestID(node, in: snapshot), node.testID == nil {
                 issues.append(
                     LoupeLayoutIssue(
                         kind: .missingTestID,
@@ -225,7 +395,7 @@ public enum LoupeLayoutAuditor {
             }
 
             let minimumSide = min(frame.width, frame.height)
-            if minimumSide < options.minTouchTarget {
+            if shouldAuditTouchTargetSize(node, in: snapshot), minimumSide < options.minTouchTarget {
                 issues.append(
                     LoupeLayoutIssue(
                         kind: .smallInteractiveTarget,
@@ -242,13 +412,31 @@ public enum LoupeLayoutAuditor {
         }
     }
 
+    private static func shouldAuditTouchTargetSize(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isSystemOwnedImplementationDetail(node) {
+            return false
+        }
+        if isSystemOwnedCellAccessory(node, in: snapshot) {
+            return false
+        }
+        if isScrollContainer(node) {
+            return false
+        }
+        return true
+    }
+
     private static func contrastIssues(
         in snapshot: LoupeSnapshot,
+        screenFrame: LoupeRect,
+        activeModalOverlayRefs: Set<String>,
         options: LoupeLayoutAuditOptions
     ) -> [LoupeLayoutIssue] {
         snapshot.nodes.values.compactMap { node in
             guard
                 node.isVisible,
+                intersectsScreen(node, screenFrame: screenFrame),
+                shouldAuditNodeInModalContext(node, activeModalOverlayRefs: activeModalOverlayRefs, snapshot: snapshot),
+                shouldAuditContrast(node, in: snapshot),
                 LoupeObservationCompactor.displayText(for: node) != nil,
                 let textColor = node.style?.textColor,
                 let backgroundColor = effectiveBackgroundColor(for: node, in: snapshot)
@@ -273,6 +461,64 @@ public enum LoupeLayoutAuditor {
         }
     }
 
+    private static func shouldAuditContrast(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isDisabledControlContext(node, in: snapshot) {
+            return false
+        }
+        if isEmptyTextInputPlaceholder(node, in: snapshot) {
+            return false
+        }
+        return true
+    }
+
+    private static func isDisabledControlContext(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isPublicInteractiveUIKitElement(node), !node.isEnabled {
+            return true
+        }
+
+        var parentRef = node.parentRef
+        while let ref = parentRef, let parent = snapshot.nodes[ref] {
+            if isPublicInteractiveUIKitElement(parent), !parent.isEnabled {
+                return true
+            }
+            parentRef = parent.parentRef
+        }
+        return false
+    }
+
+    private static func isEmptyTextInputPlaceholder(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        guard let text = LoupeObservationCompactor.displayText(for: node), !text.isEmpty else {
+            return false
+        }
+
+        var parentRef = node.parentRef
+        while let ref = parentRef, let parent = snapshot.nodes[ref] {
+            if isTextInput(parent),
+               textInputValue(parent) == nil,
+               placeholderText(for: parent) == text {
+                return true
+            }
+            parentRef = parent.parentRef
+        }
+        return false
+    }
+
+    private static func isTextInput(_ node: LoupeNode) -> Bool {
+        node.uiKit?.textField != nil || node.uiKit?.textView != nil
+    }
+
+    private static func textInputValue(_ node: LoupeNode) -> String? {
+        [node.text, node.renderedText, node.value]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
+    private static func placeholderText(for node: LoupeNode) -> String? {
+        [node.placeholder, node.semanticText, node.label]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
     private static func effectiveBackgroundColor(for node: LoupeNode, in snapshot: LoupeSnapshot) -> LoupeColor? {
         if let color = node.style?.backgroundColor, color.alpha > 0 {
             return color
@@ -280,6 +526,9 @@ public enum LoupeLayoutAuditor {
 
         var parentRef = node.parentRef
         while let ref = parentRef, let parent = snapshot.nodes[ref] {
+            if isRootWindowNode(parent) {
+                return nil
+            }
             if let color = parent.style?.backgroundColor, color.alpha > 0 {
                 return color
             }
@@ -288,23 +537,338 @@ public enum LoupeLayoutAuditor {
         return nil
     }
 
-    private static func shouldRequireTestID(_ node: LoupeNode) -> Bool {
-        let className = node.uiKit?.className ?? node.typeName
-        guard !className.hasPrefix("_") else {
+    private static func isSystemOwnedImplementationDetail(_ node: LoupeNode) -> Bool {
+        guard isAppleRuntime(node), node.testID == nil else {
+            return false
+        }
+        return !isPublicInteractiveUIKitElement(node)
+    }
+
+    private static func isSystemGeneratedTestID(_ testID: String?) -> Bool {
+        guard let testID else { return false }
+        return testID.hasPrefix("_")
+            || testID.hasPrefix("com.apple.")
+            || testID == "inputView"
+    }
+
+    private static func hasAmbiguousDuplicateTargets(_ nodes: [LoupeNode]) -> Bool {
+        for index in nodes.indices {
+            for otherIndex in nodes.indices.dropFirst(index + 1) {
+                if !sameActionTarget(nodes[index], nodes[otherIndex]) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private static func sameActionTarget(_ first: LoupeNode, _ second: LoupeNode) -> Bool {
+        guard let firstFrame = first.frame, let secondFrame = second.frame else {
+            return first.frame == nil && second.frame == nil
+        }
+        return abs(firstFrame.x - secondFrame.x) <= 1
+            && abs(firstFrame.y - secondFrame.y) <= 1
+            && abs(firstFrame.width - secondFrame.width) <= 1
+            && abs(firstFrame.height - secondFrame.height) <= 1
+    }
+
+    private static func containmentOverflowRatio(parent: LoupeRect, child: LoupeRect, tolerance: Double) -> Double {
+        if parent.contains(child, tolerance: tolerance) {
+            return 0
+        }
+
+        let childArea = area(child)
+        guard childArea > 0 else { return 0 }
+        return max(0, childArea - parent.intersectionArea(with: child)) / childArea
+    }
+
+    private static func overlapRatio(_ first: LoupeRect, _ second: LoupeRect, overlapArea: Double) -> Double {
+        let smallerArea = min(area(first), area(second))
+        guard smallerArea > 0 else { return 0 }
+        return overlapArea / smallerArea
+    }
+
+    private static func area(_ rect: LoupeRect) -> Double {
+        max(0, rect.width) * max(0, rect.height)
+    }
+
+    private static func intersectsScreen(_ node: LoupeNode, screenFrame: LoupeRect) -> Bool {
+        guard let frame = node.frame else { return false }
+        return clipped(frame, to: screenFrame) != nil
+    }
+
+    private static func clipped(_ rect: LoupeRect, to bounds: LoupeRect) -> LoupeRect? {
+        let x = max(rect.x, bounds.x)
+        let y = max(rect.y, bounds.y)
+        let maxX = min(rect.maxX, bounds.maxX)
+        let maxY = min(rect.maxY, bounds.maxY)
+        guard maxX > x, maxY > y else { return nil }
+        return LoupeRect(x: x, y: y, width: maxX - x, height: maxY - y)
+    }
+
+    private static func intersection(_ first: LoupeRect, _ second: LoupeRect) -> LoupeRect? {
+        let x = max(first.x, second.x)
+        let y = max(first.y, second.y)
+        let maxX = min(first.maxX, second.maxX)
+        let maxY = min(first.maxY, second.maxY)
+        guard maxX > x, maxY > y else { return nil }
+        return LoupeRect(x: x, y: y, width: maxX - x, height: maxY - y)
+    }
+
+    private static func isSystemChromeOverlapPair(_ first: LoupeNode, _ second: LoupeNode) -> Bool {
+        isSystemChromeOverlapNode(first) || isSystemChromeOverlapNode(second)
+    }
+
+    private static func isIntentionalOverlayOverlapPair(
+        _ first: LoupeNode,
+        _ second: LoupeNode,
+        snapshot: LoupeSnapshot,
+        screenFrame: LoupeRect
+    ) -> Bool {
+        if isIntentionalOverlayOverlapNode(first) || isIntentionalOverlayOverlapNode(second) {
+            return true
+        }
+        return (isModalBackdropNode(first, screenFrame: screenFrame)
+            && containsActiveModalOverlayDescendant(second, in: snapshot, screenFrame: screenFrame))
+            || (isModalBackdropNode(second, screenFrame: screenFrame)
+                && containsActiveModalOverlayDescendant(first, in: snapshot, screenFrame: screenFrame))
+    }
+
+    private static func isIntentionalOverlayOverlapNode(_ node: LoupeNode) -> Bool {
+        node.uiKit?.viewControllerRole == "alert"
+    }
+
+    private static func activeModalOverlayRefs(in snapshot: LoupeSnapshot, screenFrame: LoupeRect) -> Set<String> {
+        Set(snapshot.nodes.values.compactMap { node in
+            guard node.isVisible, intersectsScreen(node, screenFrame: screenFrame) else {
+                return nil
+            }
+            return isActiveModalOverlayNode(node) ? node.ref : nil
+        })
+    }
+
+    private static func isActiveModalOverlayNode(_ node: LoupeNode) -> Bool {
+        node.uiKit?.viewControllerRole == "alert"
+    }
+
+    private static func containsActiveModalOverlayDescendant(
+        _ node: LoupeNode,
+        in snapshot: LoupeSnapshot,
+        screenFrame: LoupeRect
+    ) -> Bool {
+        var refs = [node.ref]
+        var seen = Set<String>()
+        while let ref = refs.popLast() {
+            guard seen.insert(ref).inserted, let current = snapshot.nodes[ref] else {
+                continue
+            }
+            if current.isVisible,
+               intersectsScreen(current, screenFrame: screenFrame),
+               isActiveModalOverlayNode(current) {
+                return true
+            }
+            refs.append(contentsOf: current.children)
+        }
+        return false
+    }
+
+    private static func isModalBackdropNode(_ node: LoupeNode, screenFrame: LoupeRect) -> Bool {
+        guard isAppleRuntime(node),
+              node.testID == nil,
+              node.role == nil,
+              node.accessibility?.isElement != true,
+              !isPublicInteractiveUIKitElement(node),
+              LoupeObservationCompactor.displayText(for: node) == nil,
+              let frame = node.frame,
+              let clippedFrame = clipped(frame, to: screenFrame) else {
+            return false
+        }
+        let screenArea = area(screenFrame)
+        guard screenArea > 0 else {
+            return false
+        }
+        return area(clippedFrame) / screenArea >= 0.8
+    }
+
+    private static func shouldAuditNodeInModalContext(
+        _ node: LoupeNode,
+        activeModalOverlayRefs: Set<String>,
+        snapshot: LoupeSnapshot
+    ) -> Bool {
+        guard !activeModalOverlayRefs.isEmpty else {
+            return true
+        }
+        if activeModalOverlayRefs.contains(node.ref) {
+            return true
+        }
+
+        var parentRef = node.parentRef
+        while let ref = parentRef {
+            if activeModalOverlayRefs.contains(ref) {
+                return true
+            }
+            parentRef = snapshot.nodes[ref]?.parentRef
+        }
+        return false
+    }
+
+    private static func isSystemChromeOverlapNode(_ node: LoupeNode) -> Bool {
+        if isRootWindowNode(node) {
+            return true
+        }
+        if node.role == "navigationBar" || node.role == "tabBar" || node.role == "toolbar" {
+            return true
+        }
+        if node.kind == .barButtonItem || node.kind == .tabBarItem {
+            return true
+        }
+        return isSystemOwnedPassiveDecoration(node)
+    }
+
+    private static func isSystemChromeContainmentNode(_ node: LoupeNode) -> Bool {
+        isSystemOwnedPassiveDecoration(node)
+    }
+
+    private static func isSystemOwnedPassiveDecoration(_ node: LoupeNode) -> Bool {
+        guard isAppleRuntime(node) else {
+            return false
+        }
+        if node.testID != nil || node.accessibility?.isElement == true {
+            return false
+        }
+        if node.isInteractive || isPublicInteractiveUIKitElement(node) {
+            return false
+        }
+        return LoupeObservationCompactor.displayText(for: node) == nil
+    }
+
+    private static func isRootWindowNode(_ node: LoupeNode) -> Bool {
+        node.kind == .application || node.kind == .scene || node.kind == .window
+    }
+
+    private static func isSystemChromeDescendant(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        guard isAppleRuntime(node) else {
+            return false
+        }
+        if isSystemChromeRole(node.role) {
+            return true
+        }
+        var currentRef = node.parentRef
+        while let ref = currentRef, let current = snapshot.nodes[ref] {
+            if isSystemChromeRole(current.role) {
+                return true
+            }
+            currentRef = current.parentRef
+        }
+        return false
+    }
+
+    private static func isSystemChromeRole(_ role: String?) -> Bool {
+        role == "navigationBar" || role == "tabBar" || role == "toolbar"
+    }
+
+    private static func isSystemOwnedAggregateContainer(_ node: LoupeNode, screenFrame: LoupeRect) -> Bool {
+        guard isAppleRuntime(node),
+              node.testID == nil,
+              node.role == nil,
+              node.accessibility?.isElement != true,
+              !node.isInteractive,
+              !node.children.isEmpty,
+              let frame = node.frame else {
+            return false
+        }
+        let screenArea = area(screenFrame)
+        guard screenArea > 0 else {
+            return false
+        }
+        return area(frame) / screenArea >= 0.5
+    }
+
+    private static func shouldRequireTestID(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isSystemOwnedImplementationDetail(node) {
+            return false
+        }
+        if isSystemOwnedCellAccessory(node, in: snapshot) {
             return false
         }
 
-        let publicInteractiveClasses = [
-            "UIButton",
-            "UISwitch",
-            "UISlider",
-            "UISegmentedControl",
-            "UITextField",
-            "UITextView",
-            "UITableViewCell",
-            "UICollectionViewCell",
-        ]
-        return publicInteractiveClasses.contains { className == $0 || className.hasSuffix(".\($0)") }
+        return isPublicInteractiveUIKitElement(node)
+    }
+
+    private static func isSystemOwnedCellAccessory(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        guard isAppleRuntime(node),
+              node.testID == nil,
+              node.role == "button",
+              node.accessibility?.isElement != true,
+              LoupeObservationCompactor.displayText(for: node) == nil,
+              node.uiKit?.userInteractionEnabled == false,
+              hasAncestorRole("cell", node, in: snapshot),
+              hasImageDescendant(node, in: snapshot) else {
+            return false
+        }
+        return true
+    }
+
+    private static func isPublicInteractiveUIKitElement(_ node: LoupeNode) -> Bool {
+        if node.uiKit?.button != nil
+            || node.uiKit?.switchControl != nil
+            || node.uiKit?.slider != nil
+            || node.uiKit?.stepper != nil
+            || node.uiKit?.segmentedControl != nil
+            || node.uiKit?.textField != nil
+            || node.uiKit?.textView != nil {
+            return true
+        }
+        return node.role == "cell"
+    }
+
+    private static func hasAncestorRole(_ role: String, _ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        var parentRef = node.parentRef
+        while let ref = parentRef, let parent = snapshot.nodes[ref] {
+            if parent.role == role {
+                return true
+            }
+            parentRef = parent.parentRef
+        }
+        return false
+    }
+
+    private static func hasImageDescendant(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        node.children.contains { ref in
+            guard let child = snapshot.nodes[ref] else {
+                return false
+            }
+            if isImageNode(child), LoupeObservationCompactor.displayText(for: child) == nil {
+                return true
+            }
+            return hasImageDescendant(child, in: snapshot)
+        }
+    }
+
+    private static func isAppleRuntime(_ node: LoupeNode) -> Bool {
+        node.runtime?.frameworkBundleIdentifier?.hasPrefix("com.apple.") == true
+    }
+
+    private static func hasHorizontallyDisplacedCellAncestor(
+        _ node: LoupeNode,
+        in snapshot: LoupeSnapshot,
+        screenFrame: LoupeRect
+    ) -> Bool {
+        var current: LoupeNode? = node
+        while let candidate = current {
+            if candidate.role == "cell", isHorizontallyPartiallyOffscreen(candidate, screenFrame: screenFrame) {
+                return true
+            }
+            current = candidate.parentRef.flatMap { snapshot.nodes[$0] }
+        }
+        return false
+    }
+
+    private static func isHorizontallyPartiallyOffscreen(_ node: LoupeNode, screenFrame: LoupeRect) -> Bool {
+        guard let frame = node.frame, frame.intersects(screenFrame) else {
+            return false
+        }
+        return frame.x < screenFrame.x - 1 || frame.maxX > screenFrame.maxX + 1
     }
 
     private static func contrastRatio(_ lhs: LoupeColor, _ rhs: LoupeColor) -> Double {
