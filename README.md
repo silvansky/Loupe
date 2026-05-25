@@ -157,6 +157,10 @@ instead of silently accepted.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local verification and pull request
 checks.
 
+## License
+
+Loupe is released under the [MIT License](LICENSE).
+
 ## Inspiration
 
 Loupe's simulator inspection and action direction is inspired by
