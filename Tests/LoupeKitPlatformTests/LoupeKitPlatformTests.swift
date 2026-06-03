@@ -184,6 +184,17 @@ import AppKit
         #expect(responderReport.responderChain.contains { $0.testID == fixture.buttonTestID })
         #expect(!agent.mutationCapabilities().isEmpty)
 
+        let activation = try agent.activate(
+            LoupeActivationRequest(
+                selector: LoupeMutationSelector(kind: .testID, value: fixture.buttonTestID)
+            )
+        )
+        #expect(activation.target.testID == fixture.buttonTestID)
+        #expect(activation.before.testID == fixture.buttonTestID)
+        #expect(activation.after?.testID == fixture.buttonTestID)
+        #expect(activation.actionElapsed >= 0)
+        #expect(fixture.activationCount == 1)
+
         let enabledMutation = try agent.mutate(
             LoupeMutationRequest(
                 selector: LoupeMutationSelector(kind: .testID, value: fixture.buttonTestID),
@@ -231,6 +242,8 @@ private final class AppKitFixture {
 
     private let window: NSWindow
     private let nativeAXHost: NativeAccessibilityHostView
+    private let activationTarget = AppKitActivationTarget()
+    var activationCount: Int { activationTarget.count }
 
     init() {
         _ = NSApplication.shared
@@ -256,6 +269,8 @@ private final class AppKitFixture {
         button.bezelStyle = .rounded
         button.testID(buttonTestID)
         button.testProperty("fixture", "appkit")
+        button.target = activationTarget
+        button.action = #selector(AppKitActivationTarget.runButton)
 
         let segmented = NSSegmentedControl(frame: NSRect(x: 80, y: 52, width: 140, height: 28))
         segmented.segmentCount = 2
@@ -313,6 +328,14 @@ private final class AppKitFixture {
     func tearDown() {
         window.orderOut(nil)
         window.close()
+    }
+}
+
+private final class AppKitActivationTarget: NSObject {
+    private(set) var count = 0
+
+    @objc func runButton() {
+        count += 1
     }
 }
 

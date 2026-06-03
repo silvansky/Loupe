@@ -331,6 +331,20 @@ public final class LoupeServer: @unchecked Sendable {
             } catch {
                 return ResponsePayload(status: 400, body: errorBody("mutation_failed", error: error))
             }
+        case "/activate":
+            guard request.method == "POST" else {
+                return ResponsePayload(status: 405, body: #"{"error":"method_not_allowed"}"#)
+            }
+            do {
+                let action = try JSONDecoder().decode(LoupeActivationRequest.self, from: request.body)
+                let response = try LoupeAgent().activate(action)
+                let data = try makeLoupeJSONEncoder().encode(response)
+                return ResponsePayload(status: 200, body: String(decoding: data, as: UTF8.self))
+            } catch let error as LoupeMutationError {
+                return ResponsePayload(status: error.status, body: errorBody(error.code, message: error.message))
+            } catch {
+                return ResponsePayload(status: 400, body: errorBody("activation_failed", error: error))
+            }
         case "/constraint":
             guard request.method == "POST" else {
                 return ResponsePayload(status: 405, body: #"{"error":"method_not_allowed"}"#)

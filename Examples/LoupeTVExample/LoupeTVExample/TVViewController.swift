@@ -14,6 +14,7 @@ final class TVViewController: UIViewController {
     }
 
     private func buildView() {
+        view.subviews.forEach { $0.removeFromSuperview() }
         view.accessibilityIdentifier = "tv.example.root"
         view.backgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.11, alpha: 1)
 
@@ -66,6 +67,26 @@ final class TVViewController: UIViewController {
         legacyButton.titleLabel?.font = .systemFont(ofSize: 30, weight: .semibold)
         legacyButton.addTarget(self, action: #selector(openLegacyFlow), for: .primaryActionTriggered)
 
+        let detailButton = UIButton(type: .system)
+        detailButton.accessibilityIdentifier = "tv.example.openDetail"
+        detailButton.isAccessibilityElement = true
+        detailButton.accessibilityLabel = "Open detail route"
+        detailButton.setTitle("Open detail route", for: .normal)
+        detailButton.setTitleColor(.white, for: .normal)
+        detailButton.setTitleColor(UIColor(red: 0.74, green: 0.91, blue: 1, alpha: 1), for: .focused)
+        detailButton.titleLabel?.font = .systemFont(ofSize: 30, weight: .semibold)
+        detailButton.addTarget(self, action: #selector(openDetailRoute), for: .primaryActionTriggered)
+
+        let longListButton = UIButton(type: .system)
+        longListButton.accessibilityIdentifier = "tv.example.openLongList"
+        longListButton.isAccessibilityElement = true
+        longListButton.accessibilityLabel = "Open long list route"
+        longListButton.setTitle("Open long list route", for: .normal)
+        longListButton.setTitleColor(.white, for: .normal)
+        longListButton.setTitleColor(UIColor(red: 0.74, green: 0.91, blue: 1, alpha: 1), for: .focused)
+        longListButton.titleLabel?.font = .systemFont(ofSize: 30, weight: .semibold)
+        longListButton.addTarget(self, action: #selector(openLongListRoute), for: .primaryActionTriggered)
+
         let list = makeList()
         list.accessibilityIdentifier = "tv.example.collection"
 
@@ -83,6 +104,8 @@ final class TVViewController: UIViewController {
             secondaryButton,
             logoutButton,
             legacyButton,
+            detailButton,
+            longListButton,
             badContrast,
             list,
             emptyFeed,
@@ -102,6 +125,90 @@ final class TVViewController: UIViewController {
             emptyFeed.widthAnchor.constraint(equalTo: stack.widthAnchor),
             emptyFeed.heightAnchor.constraint(equalToConstant: 96),
         ])
+    }
+
+    private func buildRouteView(
+        rootTestID: String,
+        titleText: String,
+        scrollTestID: String,
+        rowPrefix: String,
+        rows: Int
+    ) {
+        view.subviews.forEach { $0.removeFromSuperview() }
+        view.accessibilityIdentifier = rootTestID
+        view.backgroundColor = UIColor(red: 0.06, green: 0.08, blue: 0.11, alpha: 1)
+
+        let title = UILabel()
+        title.accessibilityIdentifier = "\(rootTestID).title"
+        title.text = titleText
+        title.textColor = .white
+        title.font = .systemFont(ofSize: 54, weight: .bold)
+
+        let back = UIButton(type: .system)
+        back.accessibilityIdentifier = "\(rootTestID).back"
+        back.isAccessibilityElement = true
+        back.accessibilityLabel = "Back to workbench"
+        back.setTitle("Back to workbench", for: .normal)
+        back.setTitleColor(.white, for: .normal)
+        back.setTitleColor(UIColor(red: 0.74, green: 0.91, blue: 1, alpha: 1), for: .focused)
+        back.titleLabel?.font = .systemFont(ofSize: 30, weight: .semibold)
+        back.addTarget(self, action: #selector(showWorkbenchRoute), for: .primaryActionTriggered)
+
+        let summary = UILabel()
+        summary.accessibilityIdentifier = "\(rootTestID).summary"
+        summary.text = "Reached through tvOS remote routing"
+        summary.textColor = UIColor(red: 0.74, green: 0.91, blue: 1, alpha: 1)
+        summary.font = .systemFont(ofSize: 30, weight: .medium)
+
+        let scroll = makeRouteScroll(testID: scrollTestID, rowPrefix: rowPrefix, rows: rows)
+
+        let stack = UIStackView(arrangedSubviews: [title, back, summary, scroll])
+        stack.axis = .vertical
+        stack.alignment = .leading
+        stack.spacing = 32
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 96),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -96),
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 72),
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 520),
+        ])
+        setNeedsFocusUpdate()
+    }
+
+    private func makeRouteScroll(testID: String, rowPrefix: String, rows: Int) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.accessibilityIdentifier = testID
+        scrollView.backgroundColor = UIColor(white: 1, alpha: 0.08)
+        scrollView.layer.cornerRadius = 18
+
+        let content = UIStackView()
+        content.axis = .vertical
+        content.spacing = 16
+        content.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(content)
+
+        for index in 1...rows {
+            let label = UILabel()
+            label.accessibilityIdentifier = "\(rowPrefix).\(index)"
+            label.text = "route row \(index)"
+            label.textColor = .white
+            label.font = .systemFont(ofSize: 28, weight: .medium)
+            content.addArrangedSubview(label)
+        }
+
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 28),
+            content.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -28),
+            content.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 28),
+            content.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -28),
+            content.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -56),
+        ])
+
+        return scrollView
     }
 
     private func makeList() -> UIScrollView {
@@ -251,6 +358,33 @@ final class TVViewController: UIViewController {
             statusLabel.text = "Legacy flow active"
             Loupe.log("tv_example_legacy_flow", metadata: ["screen": .string("workbench")])
         }
+    }
+
+    @objc private func openDetailRoute() {
+        buildRouteView(
+            rootTestID: "tv.example.detail",
+            titleText: "tvOS Detail Route",
+            scrollTestID: "tv.example.detail.scroll",
+            rowPrefix: "tv.example.detail.row",
+            rows: 18
+        )
+        Loupe.log("tv_example_detail_route", metadata: ["screen": .string("detail")])
+    }
+
+    @objc private func openLongListRoute() {
+        buildRouteView(
+            rootTestID: "tv.example.longList",
+            titleText: "tvOS Long List",
+            scrollTestID: "tv.example.longList.scroll",
+            rowPrefix: "tv.example.longList.row",
+            rows: 42
+        )
+        Loupe.log("tv_example_long_list_route", metadata: ["screen": .string("longList")])
+    }
+
+    @objc private func showWorkbenchRoute() {
+        buildView()
+        Loupe.log("tv_example_workbench_route", metadata: ["screen": .string("workbench")])
     }
 
     private func upsertKeychainFixture() {

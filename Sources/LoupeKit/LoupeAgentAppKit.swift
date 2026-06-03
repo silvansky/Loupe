@@ -167,6 +167,61 @@ public final class LoupeAgent {
             .sorted { $0.property < $1.property }
     }
 
+    public func activate(_ request: LoupeActivationRequest) throws -> LoupeActivationResponse {
+        let beforeCapture = captureSnapshotWithViewRefs()
+        let selector = loupeSelector(from: request.selector)
+        let matches = LoupeSnapshotQuery.find(
+            selector,
+            in: beforeCapture.snapshot,
+            options: LoupeQueryOptions(includeHidden: false, includeDisabled: false, maxResults: 8)
+        )
+
+        guard matches.count == 1, let target = matches.first else {
+            if matches.isEmpty {
+                throw LoupeMutationError(status: 404, code: "node_not_found", message: "No view node matched selector.")
+            }
+            throw LoupeMutationError(
+                code: "ambiguous_selector",
+                message: "Selector matched multiple view nodes: \(matches.map { $0.ref }.joined(separator: ", "))"
+            )
+        }
+
+        guard let beforeNode = beforeCapture.snapshot.nodes[target.ref] else {
+            throw LoupeMutationError(status: 404, code: "node_not_found", message: "Matched node disappeared before activation.")
+        }
+        guard let view = beforeCapture.viewsByRef[target.ref] else {
+            throw LoupeMutationError(
+                code: "unsupported_target",
+                message: "Matched node \(target.ref) is synthetic or not backed by an NSView."
+            )
+        }
+
+        let startedAt = Date()
+        try activateView(view)
+        view.layoutSubtreeIfNeeded()
+        view.superview?.layoutSubtreeIfNeeded()
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        LoupeRuntime.shared.log(
+            level: "info",
+            "activation_applied",
+            metadata: [
+                "ref": .string(target.ref),
+                "testID": target.testID.map(LoupeMetadataValue.string) ?? .string("")
+            ]
+        )
+
+        let afterCapture = captureSnapshotWithViewRefs()
+        return LoupeActivationResponse(
+            selector: request.selector,
+            target: target,
+            before: beforeNode,
+            after: afterCapture.snapshot.nodes[target.ref],
+            actionElapsed: elapsed,
+            snapshotID: afterCapture.snapshot.id
+        )
+    }
+
     public func mutate(_ request: LoupeMutationRequest) throws -> LoupeMutationResponse {
         let beforeCapture = captureSnapshotWithViewRefs()
         let selector = loupeSelector(from: request.selector)
@@ -882,6 +937,17 @@ private func unsupportedProperty(_ property: String, view: NSView) -> LoupeMutat
         code: "unsupported_property",
         message: "Property '\(property)' is not supported for \(typeName(of: view))."
     )
+}
+
+@MainActor
+private func activateView(_ view: NSView) throws {
+    guard let control = view as? NSControl else {
+        throw LoupeMutationError(
+            code: "unsupported_activation_target",
+            message: "Matched view \(typeName(of: view)) is not an NSControl."
+        )
+    }
+    control.performClick(nil)
 }
 
 @MainActor

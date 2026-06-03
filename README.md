@@ -97,8 +97,9 @@ diagnostic loops. These are Loupe-native versions of common agent questions:
 
 The examples verify these primitives across iOS Simulator, macOS, and tvOS where
 the platform backend supports them. iOS Simulator verifies native HID scroll
-profiling; linked macOS and tvOS runtimes verify the runtime offset profiling
-mode without claiming host HID scroll input.
+profiling; linked macOS verifies runtime-backed AppKit control activation plus
+route scroll probes; tvOS verifies remote-press routing plus runtime offset
+profiling.
 
 Run the platform examples directly when checking this support:
 

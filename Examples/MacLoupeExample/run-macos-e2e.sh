@@ -16,6 +16,7 @@ ACCESSIBILITY_PATH="/tmp/loupe-macos-accessibility.json"
 VIEW_TREE_PATH="/tmp/loupe-macos-view-tree.txt"
 ACCESSIBILITY_TREE_PATH="/tmp/loupe-macos-accessibility-tree.txt"
 LOGS_PATH="/tmp/loupe-macos-logs.json"
+ROUTE_LOGS_PATH="/tmp/loupe-macos-route-logs.json"
 NEW_NAV_LOGS_PATH="/tmp/loupe-macos-new-nav-logs.json"
 LOGOUT_LOGS_PATH="/tmp/loupe-macos-logout-logs.json"
 NETWORK_PATH="/tmp/loupe-macos-network.json"
@@ -32,13 +33,22 @@ RESPONDER_PATH="/tmp/loupe-macos-responder-chain.json"
 ENV_PATH="/tmp/loupe-macos-env.json"
 AUDIT_PATH="/tmp/loupe-macos-audit.json"
 PERF_PATH="/tmp/loupe-macos-perf.json"
+DETAIL_SCROLL_PATH="/tmp/loupe-macos-detail-scroll.json"
+LONG_LIST_SCROLL_PATH="/tmp/loupe-macos-long-list-scroll.json"
 MUTATION_PATH="/tmp/loupe-macos-mutation.json"
 INSPECT_PATH="/tmp/loupe-macos-inspect.json"
 INSPECT_TITLE_PATH="/tmp/loupe-macos-inspect-title.json"
 INSPECT_EMPTY_PATH="/tmp/loupe-macos-inspect-empty.json"
 QUERY_PATH="/tmp/loupe-macos-query.json"
+DETAIL_SNAPSHOT_PATH="/tmp/loupe-macos-detail-snapshot.json"
+LONG_LIST_SNAPSHOT_PATH="/tmp/loupe-macos-long-list-snapshot.json"
+DETAIL_TRACE_DIR="/tmp/loupe-macos-detail-route-trace"
+DETAIL_BACK_TRACE_DIR="/tmp/loupe-macos-detail-back-trace"
+LONG_LIST_TRACE_DIR="/tmp/loupe-macos-long-list-route-trace"
+LONG_LIST_BACK_TRACE_DIR="/tmp/loupe-macos-long-list-back-trace"
 
-rm -f "$APP_LOG" "$SNAPSHOT_PATH" "$DARK_SNAPSHOT_PATH" "$ACCESSIBILITY_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$LOGS_PATH" "$NEW_NAV_LOGS_PATH" "$LOGOUT_LOGS_PATH" "$NETWORK_PATH" "$REFS_PATH" "$OBJECT_GRAPH_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$LOGOUT_FLAG_SET_PATH" "$EMPTY_FLAG_PATH" "$KEYCHAIN_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$ENV_PATH" "$AUDIT_PATH" "$PERF_PATH" "$MUTATION_PATH" "$INSPECT_PATH" "$INSPECT_TITLE_PATH" "$INSPECT_EMPTY_PATH" "$QUERY_PATH"
+rm -f "$APP_LOG" "$SNAPSHOT_PATH" "$DARK_SNAPSHOT_PATH" "$ACCESSIBILITY_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$LOGS_PATH" "$ROUTE_LOGS_PATH" "$NEW_NAV_LOGS_PATH" "$LOGOUT_LOGS_PATH" "$NETWORK_PATH" "$REFS_PATH" "$OBJECT_GRAPH_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$LOGOUT_FLAG_SET_PATH" "$EMPTY_FLAG_PATH" "$KEYCHAIN_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$ENV_PATH" "$AUDIT_PATH" "$PERF_PATH" "$DETAIL_SCROLL_PATH" "$LONG_LIST_SCROLL_PATH" "$MUTATION_PATH" "$INSPECT_PATH" "$INSPECT_TITLE_PATH" "$INSPECT_EMPTY_PATH" "$QUERY_PATH" "$DETAIL_SNAPSHOT_PATH" "$LONG_LIST_SNAPSHOT_PATH"
+rm -rf "$DETAIL_TRACE_DIR" "$DETAIL_BACK_TRACE_DIR" "$LONG_LIST_TRACE_DIR" "$LONG_LIST_BACK_TRACE_DIR"
 
 LOUPE_PORT="$PORT" .build/debug/MacLoupeExample >"$APP_LOG" 2>&1 &
 APP_PID=$!
@@ -105,6 +115,19 @@ BUTTON_POINT="$(ruby -rjson -e '
 .build/debug/loupe ui hit-test --host "$HOST" --point "$BUTTON_POINT" --output "$HIT_TEST_PATH" >/dev/null
 .build/debug/loupe ui responder-chain --host "$HOST" --test-id mac.example.refresh --output "$RESPONDER_PATH" >/dev/null
 .build/debug/loupe debug scroll --host "$HOST" --test-id mac.example.list --delta 0,40 --output "$PERF_PATH" >/dev/null
+.build/debug/loupe act tap --backend runtime --host "$HOST" --test-id mac.example.openDetail --trace-dir "$DETAIL_TRACE_DIR" --expect-visible mac.example.detail
+.build/debug/loupe act wait visible --host "$HOST" --test-id mac.example.detail.summary --timeout 5 >/tmp/loupe-macos-wait-detail.json
+.build/debug/loupe ui snapshot --host "$HOST" --timeout 10 --output "$DETAIL_SNAPSHOT_PATH" >/dev/null
+.build/debug/loupe debug scroll --host "$HOST" --test-id mac.example.detail.scroll --delta 0,80 --output "$DETAIL_SCROLL_PATH" >/dev/null
+.build/debug/loupe act tap --backend runtime --host "$HOST" --test-id mac.example.detail.back --trace-dir "$DETAIL_BACK_TRACE_DIR" --expect-visible mac.example.root
+.build/debug/loupe act wait visible --host "$HOST" --test-id mac.example.openLongList --timeout 5 >/tmp/loupe-macos-wait-workbench-after-detail.json
+.build/debug/loupe act tap --backend runtime --host "$HOST" --test-id mac.example.openLongList --trace-dir "$LONG_LIST_TRACE_DIR" --expect-visible mac.example.longList
+.build/debug/loupe act wait visible --host "$HOST" --test-id mac.example.longList.scroll --timeout 5 >/tmp/loupe-macos-wait-long-list.json
+.build/debug/loupe ui snapshot --host "$HOST" --timeout 10 --output "$LONG_LIST_SNAPSHOT_PATH" >/dev/null
+.build/debug/loupe debug scroll --host "$HOST" --test-id mac.example.longList.scroll --delta 0,120 --output "$LONG_LIST_SCROLL_PATH" >/dev/null
+.build/debug/loupe act tap --backend runtime --host "$HOST" --test-id mac.example.longList.back --trace-dir "$LONG_LIST_BACK_TRACE_DIR" --expect-visible mac.example.root
+.build/debug/loupe act wait visible --host "$HOST" --test-id mac.example.refresh --timeout 5 >/tmp/loupe-macos-wait-workbench-after-long-list.json
+.build/debug/loupe debug logs --host "$HOST" --output "$ROUTE_LOGS_PATH" >/dev/null
 .build/debug/loupe ui set --host "$HOST" --test-id mac.example.status text "AppKit mutation applied" --no-animate --output "$MUTATION_PATH" >/dev/null
 .build/debug/loupe ui appearance dark --host "$HOST" --output "$ENV_PATH" >/dev/null
 .build/debug/loupe ui snapshot --host "$HOST" --timeout 10 --output "$DARK_SNAPSHOT_PATH" >/dev/null
@@ -253,6 +276,37 @@ ruby -rjson -e '
   abort "expected macOS positive scroll delta" unless perf.dig("delta", "y").to_f > 0
   abort "expected macOS profile elapsed" unless perf["actionElapsed"].to_f >= 0
 
+  detail_snapshot = JSON.parse(File.read(ARGV.fetch(27)))
+  detail_ids = detail_snapshot.fetch("nodes").values.map { |node| node["testID"] }.compact
+  abort "expected macOS detail route root" unless detail_ids.include?("mac.example.detail")
+  abort "expected macOS detail route summary" unless detail_ids.include?("mac.example.detail.summary")
+  detail_scroll = detail_snapshot.fetch("nodes").values.find { |node| node["testID"] == "mac.example.detail.scroll" }
+  abort "expected macOS detail scroll route" unless detail_scroll && detail_scroll.dig("uiKit", "scrollView", "contentSize", "height").to_f > detail_scroll.fetch("frame").fetch("height").to_f
+  detail_perf = JSON.parse(File.read(ARGV.fetch(28)))
+  abort "expected macOS detail scroll target" unless detail_perf["testID"] == "mac.example.detail.scroll"
+  abort "expected macOS detail positive scroll delta" unless detail_perf.dig("delta", "y").to_f > 0
+
+  long_snapshot = JSON.parse(File.read(ARGV.fetch(31)))
+  long_ids = long_snapshot.fetch("nodes").values.map { |node| node["testID"] }.compact
+  abort "expected macOS long-list route root" unless long_ids.include?("mac.example.longList")
+  abort "expected macOS long-list route scroll" unless long_ids.include?("mac.example.longList.scroll")
+  long_perf = JSON.parse(File.read(ARGV.fetch(32)))
+  abort "expected macOS long-list scroll target" unless long_perf["testID"] == "mac.example.longList.scroll"
+  abort "expected macOS long-list positive scroll delta" unless long_perf.dig("delta", "y").to_f > 0
+
+  [ARGV.fetch(29), ARGV.fetch(30), ARGV.fetch(33), ARGV.fetch(34)].each do |trace|
+    ["action-before.json", "action-target.json", "action-after.json", "before-snapshot.json", "after-snapshot.json", "before-accessibility.json", "after-accessibility.json", "before-logs.json", "after-logs.json"].each do |name|
+      abort "missing macOS runtime route trace #{trace}/#{name}" unless File.exist?(File.join(trace, name))
+    end
+    action = JSON.parse(File.read(File.join(trace, "action-target.json")))
+    abort "expected macOS runtime tap trace" unless action["command"] == "tap" && action["backend"] == "runtime"
+  end
+
+  route_logs = JSON.parse(File.read(ARGV.fetch(35)))
+  abort "missing macOS detail route log" unless route_logs.any? { |entry| entry["message"] == "mac_example_detail_route" }
+  abort "missing macOS long-list route log" unless route_logs.any? { |entry| entry["message"] == "mac_example_long_list_route" }
+  abort "missing macOS workbench route log" unless route_logs.any? { |entry| entry["message"] == "mac_example_workbench_route" }
+
   mutation = JSON.parse(File.read(ARGV.fetch(19)))
   abort "expected AppKit text mutation property" unless mutation["property"] == "text"
   abort "expected AppKit mutation target" unless mutation.dig("target", "testID") == "mac.example.status"
@@ -273,7 +327,7 @@ ruby -rjson -e '
   abort "expected dark snapshot after AppKit mutation" unless dark_status && dark_status["renderedText"] == "AppKit mutation applied"
   bad_sentinel = audit.fetch("issues").select { |issue| issue["kind"] == "lowTextContrast" && issue["testID"] == "mac.example.dark.badContrast" }
   abort "expected macOS dark contrast sentinel issue" if bad_sentinel.empty?
-' "$SNAPSHOT_PATH" "$QUERY_PATH" "$INSPECT_PATH" "$LOGS_PATH" "$NETWORK_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$ENV_PATH" "$REFS_PATH" "$KEYCHAIN_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$AUDIT_PATH" "$INSPECT_TITLE_PATH" "$ACCESSIBILITY_PATH" "$INSPECT_EMPTY_PATH" "$EMPTY_FLAG_PATH" "$PERF_PATH" "$OBJECT_GRAPH_PATH" "$MUTATION_PATH" "$DARK_SNAPSHOT_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$NEW_NAV_LOGS_PATH" "$LOGOUT_FLAG_SET_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$LOGOUT_LOGS_PATH"
+' "$SNAPSHOT_PATH" "$QUERY_PATH" "$INSPECT_PATH" "$LOGS_PATH" "$NETWORK_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$ENV_PATH" "$REFS_PATH" "$KEYCHAIN_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$AUDIT_PATH" "$INSPECT_TITLE_PATH" "$ACCESSIBILITY_PATH" "$INSPECT_EMPTY_PATH" "$EMPTY_FLAG_PATH" "$PERF_PATH" "$OBJECT_GRAPH_PATH" "$MUTATION_PATH" "$DARK_SNAPSHOT_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$NEW_NAV_LOGS_PATH" "$LOGOUT_FLAG_SET_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$LOGOUT_LOGS_PATH" "$DETAIL_SNAPSHOT_PATH" "$DETAIL_SCROLL_PATH" "$DETAIL_TRACE_DIR" "$DETAIL_BACK_TRACE_DIR" "$LONG_LIST_SNAPSHOT_PATH" "$LONG_LIST_SCROLL_PATH" "$LONG_LIST_TRACE_DIR" "$LONG_LIST_BACK_TRACE_DIR" "$ROUTE_LOGS_PATH"
 
 echo "macOS example E2E passed"
 echo "snapshot: $SNAPSHOT_PATH"

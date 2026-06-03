@@ -103,6 +103,7 @@ PRESS_LOGS_PATH="/tmp/loupe-tvos-press-logs.json"
 NEW_NAV_LOGS_PATH="/tmp/loupe-tvos-new-nav-logs.json"
 LEGACY_LOGS_PATH="/tmp/loupe-tvos-legacy-logs.json"
 LOGOUT_LOGS_PATH="/tmp/loupe-tvos-logout-logs.json"
+ROUTE_LOGS_PATH="/tmp/loupe-tvos-route-logs.json"
 NETWORK_PATH="/tmp/loupe-tvos-network.json"
 REFS_PATH="/tmp/loupe-tvos-refs.json"
 OBJECT_GRAPH_PATH="/tmp/loupe-tvos-object-graph.json"
@@ -117,17 +118,25 @@ RESPONDER_PATH="/tmp/loupe-tvos-responder-chain.json"
 ENV_PATH="/tmp/loupe-tvos-env.json"
 AUDIT_PATH="/tmp/loupe-tvos-audit.json"
 PERF_PATH="/tmp/loupe-tvos-perf.json"
+DETAIL_SCROLL_PATH="/tmp/loupe-tvos-detail-scroll.json"
+LONG_LIST_SCROLL_PATH="/tmp/loupe-tvos-long-list-scroll.json"
 INSPECT_ROOT_PATH="/tmp/loupe-tvos-inspect-root.json"
 INSPECT_LIST_PATH="/tmp/loupe-tvos-inspect-list.json"
 INSPECT_EMPTY_PATH="/tmp/loupe-tvos-inspect-empty.json"
 QUERY_PATH="/tmp/loupe-tvos-query.json"
+DETAIL_SNAPSHOT_PATH="/tmp/loupe-tvos-detail-snapshot.json"
+LONG_LIST_SNAPSHOT_PATH="/tmp/loupe-tvos-long-list-snapshot.json"
 PRESS_SELECT_TRACE_DIR="/tmp/loupe-tvos-press-select-trace"
 PRESS_DOWN_TRACE_DIR="/tmp/loupe-tvos-press-down-trace"
 PRESS_NEW_NAV_TRACE_DIR="/tmp/loupe-tvos-press-new-nav-trace"
 PRESS_LEGACY_TRACE_DIR="/tmp/loupe-tvos-press-legacy-trace"
 PRESS_LOGOUT_TRACE_DIR="/tmp/loupe-tvos-press-logout-trace"
-rm -f "$SNAPSHOT_PATH" "$DARK_SNAPSHOT_PATH" "$FOCUS_SNAPSHOT_PATH" "$ACCESSIBILITY_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$RUNTIME_PATH" "$LOGS_PATH" "$PRESS_LOGS_PATH" "$NEW_NAV_LOGS_PATH" "$LEGACY_LOGS_PATH" "$LOGOUT_LOGS_PATH" "$NETWORK_PATH" "$REFS_PATH" "$OBJECT_GRAPH_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$FLAG_DISABLED_PATH" "$EMPTY_FLAG_PATH" "$KEYCHAIN_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$ENV_PATH" "$AUDIT_PATH" "$PERF_PATH" "$INSPECT_ROOT_PATH" "$INSPECT_LIST_PATH" "$INSPECT_EMPTY_PATH" "$QUERY_PATH"
-rm -rf "$PRESS_SELECT_TRACE_DIR" "$PRESS_DOWN_TRACE_DIR" "$PRESS_NEW_NAV_TRACE_DIR" "$PRESS_LEGACY_TRACE_DIR" "$PRESS_LOGOUT_TRACE_DIR"
+PRESS_DETAIL_TRACE_DIR="/tmp/loupe-tvos-press-detail-route-trace"
+PRESS_DETAIL_BACK_TRACE_DIR="/tmp/loupe-tvos-press-detail-back-trace"
+PRESS_LONG_LIST_TRACE_DIR="/tmp/loupe-tvos-press-long-list-route-trace"
+PRESS_LONG_LIST_BACK_TRACE_DIR="/tmp/loupe-tvos-press-long-list-back-trace"
+rm -f "$SNAPSHOT_PATH" "$DARK_SNAPSHOT_PATH" "$FOCUS_SNAPSHOT_PATH" "$ACCESSIBILITY_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$RUNTIME_PATH" "$LOGS_PATH" "$PRESS_LOGS_PATH" "$NEW_NAV_LOGS_PATH" "$LEGACY_LOGS_PATH" "$LOGOUT_LOGS_PATH" "$ROUTE_LOGS_PATH" "$NETWORK_PATH" "$REFS_PATH" "$OBJECT_GRAPH_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$FLAG_DISABLED_PATH" "$EMPTY_FLAG_PATH" "$KEYCHAIN_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$ENV_PATH" "$AUDIT_PATH" "$PERF_PATH" "$DETAIL_SCROLL_PATH" "$LONG_LIST_SCROLL_PATH" "$INSPECT_ROOT_PATH" "$INSPECT_LIST_PATH" "$INSPECT_EMPTY_PATH" "$QUERY_PATH" "$DETAIL_SNAPSHOT_PATH" "$LONG_LIST_SNAPSHOT_PATH"
+rm -rf "$PRESS_SELECT_TRACE_DIR" "$PRESS_DOWN_TRACE_DIR" "$PRESS_NEW_NAV_TRACE_DIR" "$PRESS_LEGACY_TRACE_DIR" "$PRESS_LOGOUT_TRACE_DIR" "$PRESS_DETAIL_TRACE_DIR" "$PRESS_DETAIL_BACK_TRACE_DIR" "$PRESS_LONG_LIST_TRACE_DIR" "$PRESS_LONG_LIST_BACK_TRACE_DIR"
 
 curl -fsS "$HOST/health" | grep -q LoupeKit
 .build/debug/loupe app info --host "$HOST" --udid "$DEVICE" > "$RUNTIME_PATH"
@@ -189,6 +198,25 @@ BUTTON_POINT="$(ruby -rjson -e '
 .build/debug/loupe act wait value --host "$HOST" --test-id tv.example.status --key text --equals "Logged out" --timeout 5 >/tmp/loupe-tvos-wait-logout.json
 .build/debug/loupe debug keychain list --host "$HOST" --output "$KEYCHAIN_AFTER_LOGOUT_PATH" >/dev/null
 .build/debug/loupe debug logs --host "$HOST" --output "$LOGOUT_LOGS_PATH" >/dev/null
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.legacyFlow
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.openDetail
+.build/debug/loupe act press select --host "$HOST" --udid "$DEVICE" --trace-dir "$PRESS_DETAIL_TRACE_DIR" --expect-visible tv.example.detail
+.build/debug/loupe act wait visible --host "$HOST" --test-id tv.example.detail.scroll --timeout 5 >/tmp/loupe-tvos-wait-detail.json
+.build/debug/loupe ui snapshot --host "$HOST" --timeout 10 --output "$DETAIL_SNAPSHOT_PATH" >/dev/null
+.build/debug/loupe debug scroll --host "$HOST" --udid "$DEVICE" --test-id tv.example.detail.scroll --delta 0,120 --output "$DETAIL_SCROLL_PATH" >/dev/null
+.build/debug/loupe act press select --host "$HOST" --udid "$DEVICE" --trace-dir "$PRESS_DETAIL_BACK_TRACE_DIR" --expect-visible tv.example.root
+.build/debug/loupe act wait visible --host "$HOST" --test-id tv.example.refresh --timeout 5 >/tmp/loupe-tvos-wait-workbench-after-detail.json
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.secondary
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.logout
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.legacyFlow
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.openDetail
+.build/debug/loupe act press down --host "$HOST" --udid "$DEVICE" --expect-visible tv.example.openLongList
+.build/debug/loupe act press select --host "$HOST" --udid "$DEVICE" --trace-dir "$PRESS_LONG_LIST_TRACE_DIR" --expect-visible tv.example.longList
+.build/debug/loupe act wait visible --host "$HOST" --test-id tv.example.longList.scroll --timeout 5 >/tmp/loupe-tvos-wait-long-list.json
+.build/debug/loupe ui snapshot --host "$HOST" --timeout 10 --output "$LONG_LIST_SNAPSHOT_PATH" >/dev/null
+.build/debug/loupe debug scroll --host "$HOST" --udid "$DEVICE" --test-id tv.example.longList.scroll --delta 0,160 --output "$LONG_LIST_SCROLL_PATH" >/dev/null
+.build/debug/loupe act press select --host "$HOST" --udid "$DEVICE" --trace-dir "$PRESS_LONG_LIST_BACK_TRACE_DIR" --expect-visible tv.example.root
+.build/debug/loupe debug logs --host "$HOST" --output "$ROUTE_LOGS_PATH" >/dev/null
 .build/debug/loupe ui appearance dark --host "$HOST" --output "$ENV_PATH" >/dev/null
 .build/debug/loupe ui snapshot --host "$HOST" --timeout 10 --output "$DARK_SNAPSHOT_PATH" >/dev/null
 .build/debug/loupe ui audit "$DARK_SNAPSHOT_PATH" --kind lowTextContrast > "$AUDIT_PATH"
@@ -396,6 +424,40 @@ ruby -rjson -e '
   abort "expected tvOS positive scroll delta" unless perf.dig("delta", "y").to_f > 0
   abort "expected tvOS profile elapsed" unless perf["actionElapsed"].to_f >= 0
 
+  detail_snapshot = JSON.parse(File.read(ARGV.fetch(35)))
+  detail_ids = detail_snapshot.fetch("nodes").values.map { |node| node["testID"] }.compact
+  abort "expected tvOS detail route root" unless detail_ids.include?("tv.example.detail")
+  abort "expected tvOS detail route scroll" unless detail_ids.include?("tv.example.detail.scroll")
+  detail_scroll = detail_snapshot.fetch("nodes").values.find { |node| node["testID"] == "tv.example.detail.scroll" }
+  abort "expected tvOS detail scroll content" unless detail_scroll && detail_scroll.dig("uiKit", "scrollView", "contentSize", "height").to_f > detail_scroll.fetch("frame").fetch("height").to_f
+  detail_perf = JSON.parse(File.read(ARGV.fetch(36)))
+  abort "expected tvOS detail scroll target" unless detail_perf["testID"] == "tv.example.detail.scroll"
+  abort "expected tvOS detail positive scroll delta" unless detail_perf.dig("delta", "y").to_f > 0
+
+  long_snapshot = JSON.parse(File.read(ARGV.fetch(39)))
+  long_ids = long_snapshot.fetch("nodes").values.map { |node| node["testID"] }.compact
+  abort "expected tvOS long-list route root" unless long_ids.include?("tv.example.longList")
+  abort "expected tvOS long-list route scroll" unless long_ids.include?("tv.example.longList.scroll")
+  long_perf = JSON.parse(File.read(ARGV.fetch(40)))
+  abort "expected tvOS long-list scroll target" unless long_perf["testID"] == "tv.example.longList.scroll"
+  abort "expected tvOS long-list positive scroll delta" unless long_perf.dig("delta", "y").to_f > 0
+
+  [ARGV.fetch(37), ARGV.fetch(38), ARGV.fetch(41), ARGV.fetch(42)].each do |trace|
+    ["action-before.json", "action-target.json", "action-after.json", "before-snapshot.json", "after-snapshot.json", "before-accessibility.json", "after-accessibility.json", "before-logs.json", "after-logs.json", "before.png", "after.png"].each do |name|
+      abort "missing tvOS route trace #{trace}/#{name}" unless File.exist?(File.join(trace, name))
+    end
+    action = JSON.parse(File.read(File.join(trace, "action-target.json")))
+    abort "expected tvOS route press trace" unless action["command"] == "press"
+  end
+  detail_after = JSON.parse(File.read(File.join(ARGV.fetch(37), "after-snapshot.json")))
+  abort "expected detail trace after snapshot" unless detail_after.fetch("nodes").values.any? { |node| node["testID"] == "tv.example.detail" }
+  long_after = JSON.parse(File.read(File.join(ARGV.fetch(41), "after-snapshot.json")))
+  abort "expected long-list trace after snapshot" unless long_after.fetch("nodes").values.any? { |node| node["testID"] == "tv.example.longList" }
+  route_logs = JSON.parse(File.read(ARGV.fetch(43)))
+  abort "missing tvOS detail route log" unless route_logs.any? { |entry| entry["message"] == "tv_example_detail_route" }
+  abort "missing tvOS long-list route log" unless route_logs.any? { |entry| entry["message"] == "tv_example_long_list_route" }
+  abort "missing tvOS workbench route log" unless route_logs.any? { |entry| entry["message"] == "tv_example_workbench_route" }
+
   env = JSON.parse(File.read(ARGV.fetch(9)))
   abort "expected dark appearance" unless env["appearance"] == "dark"
 
@@ -405,7 +467,7 @@ ruby -rjson -e '
   abort "unexpected tvOS dark contrast issues: #{bad_contrast.inspect}" unless bad_contrast.empty?
   bad_sentinel = audit.fetch("issues").select { |issue| issue["kind"] == "lowTextContrast" && issue["testID"] == "tv.example.dark.badContrast" }
   abort "expected dark contrast sentinel issue" if bad_sentinel.empty?
-' "$RUNTIME_PATH" "$SNAPSHOT_PATH" "$QUERY_PATH" "$INSPECT_ROOT_PATH" "$INSPECT_LIST_PATH" "$LOGS_PATH" "$NETWORK_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$ENV_PATH" "$DEVICE" "$REFS_PATH" "$KEYCHAIN_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$AUDIT_PATH" "$FOCUS_SNAPSHOT_PATH" "$PRESS_LOGS_PATH" "$PRESS_SELECT_TRACE_DIR" "$PRESS_DOWN_TRACE_DIR" "$ACCESSIBILITY_PATH" "$INSPECT_EMPTY_PATH" "$LEGACY_LOGS_PATH" "$LOGOUT_LOGS_PATH" "$PRESS_LEGACY_TRACE_DIR" "$PRESS_LOGOUT_TRACE_DIR" "$FLAG_DISABLED_PATH" "$EMPTY_FLAG_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$PERF_PATH" "$OBJECT_GRAPH_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$NEW_NAV_LOGS_PATH" "$PRESS_NEW_NAV_TRACE_DIR"
+' "$RUNTIME_PATH" "$SNAPSHOT_PATH" "$QUERY_PATH" "$INSPECT_ROOT_PATH" "$INSPECT_LIST_PATH" "$LOGS_PATH" "$NETWORK_PATH" "$FLAG_PATH" "$FLAG_SET_PATH" "$ENV_PATH" "$DEVICE" "$REFS_PATH" "$KEYCHAIN_PATH" "$HIT_TEST_PATH" "$RESPONDER_PATH" "$AUDIT_PATH" "$FOCUS_SNAPSHOT_PATH" "$PRESS_LOGS_PATH" "$PRESS_SELECT_TRACE_DIR" "$PRESS_DOWN_TRACE_DIR" "$ACCESSIBILITY_PATH" "$INSPECT_EMPTY_PATH" "$LEGACY_LOGS_PATH" "$LOGOUT_LOGS_PATH" "$PRESS_LEGACY_TRACE_DIR" "$PRESS_LOGOUT_TRACE_DIR" "$FLAG_DISABLED_PATH" "$EMPTY_FLAG_PATH" "$KEYCHAIN_AFTER_LOGOUT_PATH" "$PERF_PATH" "$OBJECT_GRAPH_PATH" "$VIEW_TREE_PATH" "$ACCESSIBILITY_TREE_PATH" "$NEW_NAV_LOGS_PATH" "$PRESS_NEW_NAV_TRACE_DIR" "$DETAIL_SNAPSHOT_PATH" "$DETAIL_SCROLL_PATH" "$PRESS_DETAIL_TRACE_DIR" "$PRESS_DETAIL_BACK_TRACE_DIR" "$LONG_LIST_SNAPSHOT_PATH" "$LONG_LIST_SCROLL_PATH" "$PRESS_LONG_LIST_TRACE_DIR" "$PRESS_LONG_LIST_BACK_TRACE_DIR" "$ROUTE_LOGS_PATH"
 
 echo "tvOS example E2E passed"
 echo "snapshot: $SNAPSHOT_PATH"

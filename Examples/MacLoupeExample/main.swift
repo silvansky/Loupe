@@ -55,7 +55,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         window.identifier = NSUserInterfaceItemIdentifier("mac.example.window")
         window.title = "Mac Loupe Example"
         window.center()
+        window.contentView = makeWorkbenchView()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.window = window
+    }
 
+    private func makeWorkbenchView() -> NSView {
         let root = NSView()
         root.testID("mac.example.root")
         root.testProperty("platform", "macOS")
@@ -74,12 +80,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         title.font = .systemFont(ofSize: 28, weight: .semibold)
 
         statusLabel.testID("mac.example.status")
-        statusLabel.stringValue = "Runtime online"
+        if statusLabel.stringValue == "Ready" {
+            statusLabel.stringValue = "Runtime online"
+        }
         statusLabel.font = .systemFont(ofSize: 16, weight: .medium)
 
         let button = NSButton(title: "Refresh snapshot", target: self, action: #selector(refreshStatus))
         button.testID("mac.example.refresh")
         button.bezelStyle = .rounded
+
+        let detailButton = NSButton(title: "Open detail route", target: self, action: #selector(openDetailRoute))
+        detailButton.testID("mac.example.openDetail")
+        detailButton.bezelStyle = .rounded
+
+        let longListButton = NSButton(title: "Open long list", target: self, action: #selector(openLongListRoute))
+        longListButton.testID("mac.example.openLongList")
+        longListButton.bezelStyle = .rounded
 
         let list = makeList()
         list.testID("mac.example.list")
@@ -87,6 +103,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(statusLabel)
         stack.addArrangedSubview(button)
+        stack.addArrangedSubview(NSStackView(views: [detailButton, longListButton]))
         stack.addArrangedSubview(makeDiagnosticControls())
         stack.addArrangedSubview(makeNativeAccessibilityFixture())
         stack.addArrangedSubview(makeBadContrastLabel())
@@ -102,10 +119,112 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             list.heightAnchor.constraint(equalToConstant: 220),
         ])
 
-        window.contentView = root
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        self.window = window
+        return root
+    }
+
+    private func makeDetailView() -> NSView {
+        let root = routeRoot(testID: "mac.example.detail")
+        let stack = routeStack(in: root)
+
+        let title = NSTextField(labelWithString: "macOS Detail Route")
+        title.testID("mac.example.detail.title")
+        title.font = .systemFont(ofSize: 26, weight: .semibold)
+
+        let back = NSButton(title: "Back to workbench", target: self, action: #selector(showWorkbenchRoute))
+        back.testID("mac.example.detail.back")
+        back.bezelStyle = .rounded
+
+        let summary = NSTextField(labelWithString: "Detail screen reached through runtime activation")
+        summary.testID("mac.example.detail.summary")
+        summary.font = .systemFont(ofSize: 16, weight: .medium)
+
+        let scroll = makeRouteScroll(testID: "mac.example.detail.scroll", rowPrefix: "mac.example.detail.row", rows: 18)
+
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(back)
+        stack.addArrangedSubview(summary)
+        stack.addArrangedSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 300),
+        ])
+        return root
+    }
+
+    private func makeLongListView() -> NSView {
+        let root = routeRoot(testID: "mac.example.longList")
+        let stack = routeStack(in: root)
+
+        let title = NSTextField(labelWithString: "macOS Long List")
+        title.testID("mac.example.longList.title")
+        title.font = .systemFont(ofSize: 26, weight: .semibold)
+
+        let back = NSButton(title: "Back to workbench", target: self, action: #selector(showWorkbenchRoute))
+        back.testID("mac.example.longList.back")
+        back.bezelStyle = .rounded
+
+        let scroll = makeRouteScroll(testID: "mac.example.longList.scroll", rowPrefix: "mac.example.longList.row", rows: 36)
+
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(back)
+        stack.addArrangedSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 420),
+        ])
+        return root
+    }
+
+    private func routeRoot(testID: String) -> NSView {
+        let root = NSView()
+        root.testID(testID)
+        root.testProperty("platform", "macOS")
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        return root
+    }
+
+    private func routeStack(in root: NSView) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 18
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -28),
+        ])
+        return stack
+    }
+
+    private func makeRouteScroll(testID: String, rowPrefix: String, rows: Int) -> NSScrollView {
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 10
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        for index in 1...rows {
+            let row = NSTextField(labelWithString: "route row \(index)")
+            row.identifier = NSUserInterfaceItemIdentifier("\(rowPrefix).\(index)")
+            row.font = .systemFont(ofSize: 15)
+            content.addArrangedSubview(row)
+        }
+
+        let scroll = NSScrollView()
+        scroll.testID(testID)
+        scroll.hasVerticalScroller = true
+        scroll.documentView = content
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            content.widthAnchor.constraint(equalTo: scroll.widthAnchor, constant: -18),
+        ])
+
+        return scroll
     }
 
     private func makeList() -> NSScrollView {
@@ -283,6 +402,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func refreshStatus() {
         statusLabel.stringValue = "Snapshot refreshed"
         Loupe.log("mac_example_refresh_tapped", metadata: ["screen": .string("workbench")])
+    }
+
+    @objc private func openDetailRoute() {
+        window?.contentView = makeDetailView()
+        Loupe.log("mac_example_detail_route", metadata: ["screen": .string("detail")])
+    }
+
+    @objc private func openLongListRoute() {
+        window?.contentView = makeLongListView()
+        Loupe.log("mac_example_long_list_route", metadata: ["screen": .string("longList")])
+    }
+
+    @objc private func showWorkbenchRoute() {
+        window?.contentView = makeWorkbenchView()
+        Loupe.log("mac_example_workbench_route", metadata: ["screen": .string("workbench")])
     }
 
     private func startFlagMonitor() {

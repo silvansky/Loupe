@@ -259,6 +259,39 @@ public struct LoupeMutationSourceCandidate: Codable, Equatable {
     }
 }
 
+public struct LoupeActivationRequest: Codable, Equatable {
+    public var selector: LoupeMutationSelector
+
+    public init(selector: LoupeMutationSelector) {
+        self.selector = selector
+    }
+}
+
+public struct LoupeActivationResponse: Codable, Equatable {
+    public var selector: LoupeMutationSelector
+    public var target: LoupeQueryResult
+    public var before: LoupeNode
+    public var after: LoupeNode?
+    public var actionElapsed: Double
+    public var snapshotID: String
+
+    public init(
+        selector: LoupeMutationSelector,
+        target: LoupeQueryResult,
+        before: LoupeNode,
+        after: LoupeNode?,
+        actionElapsed: Double,
+        snapshotID: String
+    ) {
+        self.selector = selector
+        self.target = target
+        self.before = before
+        self.after = after
+        self.actionElapsed = actionElapsed
+        self.snapshotID = snapshotID
+    }
+}
+
 public struct LoupeMutationNodeSummary: Codable, Equatable {
     public var ref: String
     public var typeName: String

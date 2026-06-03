@@ -1514,6 +1514,10 @@ struct LoupeCLI {
 
     static func action(command: String, arguments: [String]) async throws {
         var options = try ActionOptions(command: command, arguments: arguments)
+        let usesRuntimeActivation = options.backend == "runtime"
+        if usesRuntimeActivation && command != "tap" {
+            throw CLIError("runtime action backend currently supports tap only")
+        }
         var target: ActionTarget?
         do {
             if command == "tap",
@@ -1534,7 +1538,9 @@ struct LoupeCLI {
                 hostWasExplicit: options.hostWasExplicit,
                 udid: options.udid
             )
-            try await validateRuntimeIdentity(host: options.host, expectedUDID: options.udid, timeout: options.timeout)
+            if !usesRuntimeActivation {
+                try await validateRuntimeIdentity(host: options.host, expectedUDID: options.udid, timeout: options.timeout)
+            }
             if let traceDirectory = options.traceDirectory {
                 try prepareTraceDirectory(traceDirectory)
                 try await writePreActionTrace(command: command, options: options, traceDirectory: traceDirectory)
@@ -1555,7 +1561,11 @@ struct LoupeCLI {
                     to: traceDirectory.appendingPathComponent("action-target.json")
                 )
             }
-            try dispatchAction(command: command, options: options, target: resolvedTarget)
+            if usesRuntimeActivation {
+                try await dispatchRuntimeActivation(options: options, target: resolvedTarget)
+            } else {
+                try dispatchAction(command: command, options: options, target: resolvedTarget)
+            }
             try await verifyRuntimeAlive(host: options.host, timeout: options.timeout)
             if let scrollBaseline {
                 try await verifyScrollChanged(scrollBaseline, host: options.host, timeout: options.timeout)
@@ -1955,6 +1965,29 @@ struct LoupeCLI {
         return try JSONDecoder().decode(LoupeMutationResponse.self, from: data)
     }
 
+    private static func postActivation(
+        _ activation: LoupeActivationRequest,
+        host: URL,
+        timeout: TimeInterval
+    ) async throws -> LoupeActivationResponse {
+        let body = try makeLoupeJSONEncoder().encode(activation)
+        var request = URLRequest(url: host.appendingPathComponent("activate"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let (data, response) = try await httpData(for: request, timeout: timeout, label: "activation")
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CLIError("activation expected an HTTP response")
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = String(decoding: data, as: UTF8.self)
+            throw CLIError("activation failed with HTTP \(httpResponse.statusCode): \(body)")
+        }
+        return try JSONDecoder().decode(LoupeActivationResponse.self, from: data)
+    }
+
     private static func writeSnapshot(_ snapshot: LoupeSnapshot, to url: URL) throws {
         try makeLoupeJSONEncoder().encode(snapshot).write(to: url)
     }
@@ -2274,11 +2307,13 @@ struct LoupeCLI {
             to: traceDirectory.appendingPathComponent("action-before.json")
         )
 
-        let udid = try resolvedBackendUDID(options.udid)
-        try captureSimulatorScreenshot(
-            udid: udid,
-            outputURL: traceDirectory.appendingPathComponent("before.png")
-        )
+        if options.backend != "runtime" {
+            let udid = try resolvedBackendUDID(options.udid)
+            try captureSimulatorScreenshot(
+                udid: udid,
+                outputURL: traceDirectory.appendingPathComponent("before.png")
+            )
+        }
     }
 
     private static func writePostActionTrace(
@@ -2306,14 +2341,16 @@ struct LoupeCLI {
             to: traceDirectory.appendingPathComponent("action-after.json")
         )
 
-        let udid = try resolvedBackendUDID(options.udid)
-        let screenshotURL = traceDirectory.appendingPathComponent("after.png")
-        try captureSimulatorScreenshot(udid: udid, outputURL: screenshotURL)
-        try? cropTargetImage(
-            target: target,
-            screenshotURL: screenshotURL,
-            outputURL: traceDirectory.appendingPathComponent("target-crop.png")
-        )
+        if options.backend != "runtime" {
+            let udid = try resolvedBackendUDID(options.udid)
+            let screenshotURL = traceDirectory.appendingPathComponent("after.png")
+            try captureSimulatorScreenshot(udid: udid, outputURL: screenshotURL)
+            try? cropTargetImage(
+                target: target,
+                screenshotURL: screenshotURL,
+                outputURL: traceDirectory.appendingPathComponent("target-crop.png")
+            )
+        }
     }
 
     private static func writeFailureTrace(
@@ -2615,6 +2652,29 @@ struct LoupeCLI {
         }
     }
 
+    private static func dispatchRuntimeActivation(options: ActionOptions, target _: ActionTarget) async throws {
+        guard let selector = options.selector else {
+            throw CLIError("runtime tap requires --test-id or --ref")
+        }
+        let request = LoupeActivationRequest(selector: try activationSelector(from: selector))
+        _ = try await postActivation(request, host: options.host, timeout: options.timeout)
+    }
+
+    private static func activationSelector(from selector: LoupeSelector) throws -> LoupeMutationSelector {
+        switch selector {
+        case let .testID(value):
+            return LoupeMutationSelector(kind: .testID, value: value)
+        case let .ref(value):
+            return LoupeMutationSelector(kind: .ref, value: value)
+        case let .role(value):
+            return LoupeMutationSelector(kind: .role, value: value)
+        case let .text(value, exact):
+            return LoupeMutationSelector(kind: .text, value: value, exact: exact)
+        case let .roleAndText(role, text, exact):
+            return LoupeMutationSelector(kind: .roleAndText, value: text, role: role, exact: exact)
+        }
+    }
+
     private static func mapToDisplayPoint(_ point: LoupePoint) -> LoupePoint {
         point
     }
@@ -2649,8 +2709,8 @@ struct LoupeCLI {
     }
 
     private static func validateActionBackend(_ requested: String) throws {
-        guard requested == "auto" || requested == "native" else {
-            throw CLIError("Unsupported action backend: \(requested). Loupe currently supports native only.")
+        guard requested == "auto" || requested == "native" || requested == "runtime" else {
+            throw CLIError("Unsupported action backend: \(requested). Loupe currently supports native or runtime.")
         }
     }
 

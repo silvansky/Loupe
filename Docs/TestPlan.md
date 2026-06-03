@@ -79,8 +79,12 @@ does not count as evidence that the CLI or skill improved agent performance.
   `scripts/verify-platform-builds.sh`
 - Linked macOS AppKit runtime E2E:
   `Examples/MacLoupeExample/run-macos-e2e.sh`
+  - Covers runtime-backed AppKit button activation, workbench/detail/long-list
+    route transitions, route trace artifacts, and route scroll offset probes.
 - tvOS Simulator runtime and remote press E2E:
   `Examples/LoupeTVExample/run-tvos-runtime-e2e.sh`
+  - Covers focus-driven remote press routing into detail and long-list screens,
+    route trace artifacts, and scroll offset probes on routed scroll views.
 - Navigation pop by interactive edge gesture.
 - Navigation push by Loupe selector tap.
 - Navigation pop by Loupe ref tap.

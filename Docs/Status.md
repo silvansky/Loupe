@@ -20,6 +20,9 @@ runtime servers.
 - Dispatch simulator-visible `tap`, `swipe`, `drag`, `type`, and tvOS remote
   `press` through Loupe's native host-side action backend where the simulator
   platform supports it.
+- Dispatch `tap --backend runtime` against linked runtimes to activate
+  selector-addressed UI controls such as AppKit `NSButton` when simulator HID is
+  not the right backend.
 - Profile scroll offset changes through simulator gesture traces or runtime
   offset probes for linked/runtime platform examples.
 - Resolve action targets through the accessibility tree first, then fall back to
