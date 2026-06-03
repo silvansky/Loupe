@@ -110,6 +110,11 @@ import AppKit
         let appNode = try #require(snapshot.rootRefs.compactMap { snapshot.nodes[$0] }.first)
         let windowNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.windowTestID })
         let buttonNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.buttonTestID })
+        let segmentedNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.segmentedTestID })
+        let sliderNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.sliderTestID })
+        let stepperNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.stepperTestID })
+        let progressNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.progressTestID })
+        let imageNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.imageTestID })
 
         #expect(appNode.kind == .application)
         #expect(appNode.typeName == "NSApplication")
@@ -120,6 +125,20 @@ import AppKit
         #expect(buttonNode.custom["fixture"] == .string("appkit"))
         #expect(buttonNode.custom["runtimeTag"] == .string("posted-by-test-id"))
         #expect(buttonNode.custom["priority"] == .int(7))
+        #expect(segmentedNode.role == "segmentedControl")
+        #expect(segmentedNode.uiKit?.segmentedControl?.selectedSegmentIndex == 1)
+        #expect(segmentedNode.uiKit?.segmentedControl?.segments == ["One", "Two"])
+        #expect(sliderNode.role == "slider")
+        #expect(sliderNode.uiKit?.slider?.value == 25)
+        #expect(sliderNode.uiKit?.slider?.minimumValue == 0)
+        #expect(sliderNode.uiKit?.slider?.maximumValue == 50)
+        #expect(stepperNode.role == "stepper")
+        #expect(stepperNode.uiKit?.stepper?.value == 4)
+        #expect(stepperNode.uiKit?.stepper?.stepValue == 2)
+        #expect(progressNode.role == "progress")
+        #expect(progressNode.uiKit?.progressView?.value == 0.75)
+        #expect(imageNode.role == "image")
+        #expect(imageNode.uiKit?.imageView?.imageSize == LoupeSize(width: 18, height: 18))
 
         let buttonFrame = try #require(buttonNode.frame)
         let hitTest = agent.hitTest(point: buttonFrame.center)
@@ -135,6 +154,26 @@ import AppKit
         #expect(responderReport.hitTestID == fixture.buttonTestID)
         #expect(responderReport.responderChain.contains { $0.testID == fixture.buttonTestID })
         #expect(!agent.mutationCapabilities().isEmpty)
+
+        let segmentedMutation = try agent.mutate(
+            LoupeMutationRequest(
+                selector: LoupeMutationSelector(kind: .testID, value: fixture.segmentedTestID),
+                property: "segmentedControl.selectedSegmentIndex",
+                value: .int(0)
+            )
+        )
+        #expect(segmentedMutation.effective == .int(0))
+        #expect(segmentedMutation.changed == true)
+
+        let sliderMutation = try agent.mutate(
+            LoupeMutationRequest(
+                selector: LoupeMutationSelector(kind: .testID, value: fixture.sliderTestID),
+                property: "slider.value",
+                value: .double(30)
+            )
+        )
+        #expect(sliderMutation.effective == .double(30))
+        #expect(sliderMutation.changed == true)
     }
 }
 
@@ -142,6 +181,11 @@ import AppKit
 private final class AppKitFixture {
     let windowTestID = "platform.window"
     let buttonTestID = "platform.primaryButton"
+    let segmentedTestID = "platform.segmented"
+    let sliderTestID = "platform.slider"
+    let stepperTestID = "platform.stepper"
+    let progressTestID = "platform.progress"
+    let imageTestID = "platform.image"
 
     private let window: NSWindow
 
@@ -166,7 +210,44 @@ private final class AppKitFixture {
         button.testID(buttonTestID)
         button.testProperty("fixture", "appkit")
 
+        let segmented = NSSegmentedControl(frame: NSRect(x: 80, y: 52, width: 140, height: 28))
+        segmented.segmentCount = 2
+        segmented.setLabel("One", forSegment: 0)
+        segmented.setLabel("Two", forSegment: 1)
+        segmented.selectedSegment = 1
+        segmented.testID(segmentedTestID)
+
+        let slider = NSSlider(frame: NSRect(x: 80, y: 24, width: 120, height: 24))
+        slider.minValue = 0
+        slider.maxValue = 50
+        slider.doubleValue = 25
+        slider.testID(sliderTestID)
+
+        let stepper = NSStepper(frame: NSRect(x: 220, y: 24, width: 24, height: 24))
+        stepper.minValue = 0
+        stepper.maxValue = 10
+        stepper.increment = 2
+        stepper.doubleValue = 4
+        stepper.testID(stepperTestID)
+
+        let progress = NSProgressIndicator(frame: NSRect(x: 80, y: 12, width: 120, height: 10))
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 100
+        progress.doubleValue = 75
+        progress.testID(progressTestID)
+
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        let imageView = NSImageView(frame: NSRect(x: 260, y: 24, width: 18, height: 18))
+        imageView.image = image
+        imageView.testID(imageTestID)
+
         contentView.addSubview(button)
+        contentView.addSubview(segmented)
+        contentView.addSubview(slider)
+        contentView.addSubview(stepper)
+        contentView.addSubview(progress)
+        contentView.addSubview(imageView)
         window.contentView = contentView
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()

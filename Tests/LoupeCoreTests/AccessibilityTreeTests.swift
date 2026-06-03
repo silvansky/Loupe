@@ -65,6 +65,18 @@ struct AccessibilityTreeTests {
                         traits: ["button"],
                         activationPoint: LoupePoint(x: 195, y: 266),
                         isElement: true
+                    ),
+                    uiKit: LoupeUIKitProperties(
+                        className: "UIButton",
+                        tag: 0,
+                        alpha: 1,
+                        isHidden: false,
+                        isOpaque: false,
+                        clipsToBounds: false,
+                        userInteractionEnabled: true,
+                        isFirstResponder: false,
+                        isFocused: true,
+                        canBecomeFocused: true
                     )
                 ),
             ]
@@ -77,6 +89,8 @@ struct AccessibilityTreeTests {
         #expect(tree.nodes["ax-container"]?.children == ["ax-label", "ax-button"])
         #expect(tree.nodes["ax-button"]?.sourceRef == "button")
         #expect(tree.nodes["ax-button"]?.activationPoint == LoupePoint(x: 195, y: 266))
+        #expect(tree.nodes["ax-button"]?.isFocused == true)
+        #expect(tree.nodes["ax-button"]?.canBecomeFocused == true)
     }
 
     @Test func accessibilityQueryMatchesTestIDTextRoleAndSourceRef() {

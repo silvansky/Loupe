@@ -65,6 +65,28 @@ import Testing
         })
     }
 
+    @Test func reportsFocusPropertyChanges() {
+        let before = snapshot(
+            id: "before",
+            node: focusNode(isFocused: true, canBecomeFocused: true)
+        )
+        let after = snapshot(
+            id: "after",
+            node: focusNode(isFocused: false, canBecomeFocused: true)
+        )
+
+        let diff = LoupeCLI.snapshotDiff(before: before, after: after)
+
+        #expect(diff.changed[0].changes.contains { change in
+            change.field == "uiKit.isFocused"
+                && change.before == "true"
+                && change.after == "false"
+        })
+        #expect(!diff.changed[0].changes.contains { change in
+            change.field == "uiKit.canBecomeFocused"
+        })
+    }
+
     private func snapshot(id: String, node: LoupeNode) -> LoupeSnapshot {
         LoupeSnapshot(
             id: id,
@@ -121,6 +143,34 @@ import Testing
                     alwaysBounceVertical: true,
                     alwaysBounceHorizontal: false
                 )
+            )
+        )
+    }
+
+    private func focusNode(isFocused: Bool, canBecomeFocused: Bool) -> LoupeNode {
+        LoupeNode(
+            ref: "button",
+            parentRef: nil,
+            kind: .view,
+            typeName: "UIButton",
+            role: "button",
+            testID: "tv.example.refresh",
+            text: "Refresh snapshot",
+            frame: LoupeRect(x: 80, y: 100, width: 240, height: 64),
+            isVisible: true,
+            isEnabled: true,
+            isInteractive: true,
+            uiKit: LoupeUIKitProperties(
+                className: "UIButton",
+                tag: 0,
+                alpha: 1,
+                isHidden: false,
+                isOpaque: false,
+                clipsToBounds: false,
+                userInteractionEnabled: true,
+                isFirstResponder: false,
+                isFocused: isFocused,
+                canBecomeFocused: canBecomeFocused
             )
         )
     }

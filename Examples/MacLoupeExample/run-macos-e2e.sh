@@ -106,6 +106,30 @@ ruby -rjson -e '
   abort "expected AppKit label properties" unless title.dig("uiKit", "label", "textAlignment") == "natural"
   abort "expected AppKit label line break mode" unless title.dig("uiKit", "label", "lineBreakMode")
 
+  by_test_id = snapshot.fetch("nodes").values.each_with_object({}) { |node, map| map[node["testID"]] = node if node["testID"] }
+  segmented = by_test_id.fetch("mac.example.segmented")
+  abort "expected AppKit segmented role" unless segmented["role"] == "segmentedControl"
+  abort "expected AppKit segmented selection" unless segmented.dig("uiKit", "segmentedControl", "selectedSegmentIndex") == 1
+  abort "expected AppKit segmented labels" unless segmented.dig("uiKit", "segmentedControl", "segments") == ["List", "Detail"]
+
+  slider = by_test_id.fetch("mac.example.slider")
+  abort "expected AppKit slider role" unless slider["role"] == "slider"
+  abort "expected AppKit slider value" unless slider.dig("uiKit", "slider", "value") == 42
+  abort "expected AppKit slider range" unless slider.dig("uiKit", "slider", "minimumValue") == 0 && slider.dig("uiKit", "slider", "maximumValue") == 100
+
+  stepper = by_test_id.fetch("mac.example.stepper")
+  abort "expected AppKit stepper role" unless stepper["role"] == "stepper"
+  abort "expected AppKit stepper value" unless stepper.dig("uiKit", "stepper", "value") == 4
+  abort "expected AppKit stepper increment" unless stepper.dig("uiKit", "stepper", "stepValue") == 2
+
+  progress = by_test_id.fetch("mac.example.progress")
+  abort "expected AppKit progress role" unless progress["role"] == "progress"
+  abort "expected AppKit normalized progress" unless (progress.dig("uiKit", "progressView", "value").to_f - 0.65).abs < 0.001
+
+  image = by_test_id.fetch("mac.example.image")
+  abort "expected AppKit image role" unless image["role"] == "image"
+  abort "expected AppKit image size" unless image.dig("uiKit", "imageView", "imageSize", "width") == 24 && image.dig("uiKit", "imageView", "imageSize", "height") == 24
+
   logs = JSON.parse(File.read(ARGV.fetch(3)))
   abort "missing mac_example_visible log" unless logs.any? { |entry| entry["message"] == "mac_example_visible" }
 

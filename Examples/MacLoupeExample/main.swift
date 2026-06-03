@@ -44,7 +44,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -84,6 +84,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(statusLabel)
         stack.addArrangedSubview(button)
+        stack.addArrangedSubview(makeDiagnosticControls())
         stack.addArrangedSubview(list)
 
         NSLayoutConstraint.activate([
@@ -92,7 +93,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -28),
             list.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            list.heightAnchor.constraint(equalToConstant: 260),
+            list.heightAnchor.constraint(equalToConstant: 220),
         ])
 
         window.contentView = root
@@ -125,6 +126,44 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
 
         return scroll
+    }
+
+    private func makeDiagnosticControls() -> NSStackView {
+        let segmented = NSSegmentedControl(labels: ["List", "Detail"], trackingMode: .selectOne, target: nil, action: nil)
+        segmented.testID("mac.example.segmented")
+        segmented.selectedSegment = 1
+
+        let slider = NSSlider(value: 42, minValue: 0, maxValue: 100, target: nil, action: nil)
+        slider.testID("mac.example.slider")
+        slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
+
+        let stepper = NSStepper(frame: .zero)
+        stepper.testID("mac.example.stepper")
+        stepper.minValue = 0
+        stepper.maxValue = 10
+        stepper.increment = 2
+        stepper.doubleValue = 4
+
+        let progress = NSProgressIndicator(frame: .zero)
+        progress.testID("mac.example.progress")
+        progress.isIndeterminate = false
+        progress.style = .bar
+        progress.minValue = 0
+        progress.maxValue = 100
+        progress.doubleValue = 65
+        progress.widthAnchor.constraint(equalToConstant: 120).isActive = true
+
+        let image = NSImage(size: NSSize(width: 24, height: 24))
+        let imageView = NSImageView(image: image)
+        imageView.testID("mac.example.image")
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+
+        let row = NSStackView(views: [segmented, slider, stepper, progress, imageView])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        row.testID("mac.example.diagnostics")
+        return row
     }
 
     private func publishRuntimeFixtures() {

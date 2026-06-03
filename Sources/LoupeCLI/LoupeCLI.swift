@@ -3311,6 +3311,8 @@ struct LoupeCLI {
         appendChange("isEnabled", before.isEnabled, after.isEnabled, to: &changes)
         appendChange("isInteractive", before.isInteractive, after.isInteractive, to: &changes)
         appendChange("frame", before.frame.map(rectSummary), after.frame.map(rectSummary), to: &changes)
+        appendChange("uiKit.isFocused", before.uiKit?.isFocused, after.uiKit?.isFocused, to: &changes)
+        appendChange("uiKit.canBecomeFocused", before.uiKit?.canBecomeFocused, after.uiKit?.canBecomeFocused, to: &changes)
         appendChange("style.alpha", before.style?.alpha, after.style?.alpha, to: &changes)
         appendChange("style.backgroundColor", before.style?.backgroundColor.map(colorSummary), after.style?.backgroundColor.map(colorSummary), to: &changes)
         appendChange("style.tintColor", before.style?.tintColor.map(colorSummary), after.style?.tintColor.map(colorSummary), to: &changes)
@@ -3939,6 +3941,8 @@ struct LoupeCLI {
             node.testID.map { "testID=\($0)" },
             displayText(node).map { "text=\"\($0)\"" },
             node.frame.map { "frame=\(rectSummary($0))" },
+            node.uiKit?.isFocused == true ? "focused" : nil,
+            node.uiKit?.canBecomeFocused == true ? "focusable" : nil,
             node.isVisible ? nil : "hidden",
         ].compactMap(\.self).joined(separator: " ")
     }
@@ -3951,6 +3955,8 @@ struct LoupeCLI {
             node.testID.map { "testID=\($0)" },
             LoupeAccessibilityTreeQuery.displayText(for: node).map { "text=\"\($0)\"" },
             node.frame.map { "frame=\(rectSummary($0))" },
+            node.isFocused == true ? "focused" : nil,
+            node.canBecomeFocused == true ? "focusable" : nil,
             node.isVisible ? nil : "hidden",
         ].compactMap(\.self).joined(separator: " ")
     }

@@ -15,6 +15,8 @@ public struct LoupeAccessibilityNode: Codable, Equatable {
     public var isVisible: Bool
     public var isEnabled: Bool
     public var isInteractive: Bool
+    public var isFocused: Bool?
+    public var canBecomeFocused: Bool?
     public var children: [String]
 
     public init(
@@ -34,6 +36,46 @@ public struct LoupeAccessibilityNode: Codable, Equatable {
         isInteractive: Bool,
         children: [String] = []
     ) {
+        self.init(
+            ref: ref,
+            sourceRef: sourceRef,
+            parentRef: parentRef,
+            role: role,
+            label: label,
+            value: value,
+            hint: hint,
+            testID: testID,
+            traits: traits,
+            frame: frame,
+            activationPoint: activationPoint,
+            isVisible: isVisible,
+            isEnabled: isEnabled,
+            isInteractive: isInteractive,
+            isFocused: nil,
+            canBecomeFocused: nil,
+            children: children
+        )
+    }
+
+    public init(
+        ref: String,
+        sourceRef: String,
+        parentRef: String? = nil,
+        role: String? = nil,
+        label: String? = nil,
+        value: String? = nil,
+        hint: String? = nil,
+        testID: String? = nil,
+        traits: [String] = [],
+        frame: LoupeRect? = nil,
+        activationPoint: LoupePoint? = nil,
+        isVisible: Bool,
+        isEnabled: Bool,
+        isInteractive: Bool,
+        isFocused: Bool?,
+        canBecomeFocused: Bool?,
+        children: [String] = []
+    ) {
         self.ref = ref
         self.sourceRef = sourceRef
         self.parentRef = parentRef
@@ -48,6 +90,8 @@ public struct LoupeAccessibilityNode: Codable, Equatable {
         self.isVisible = isVisible
         self.isEnabled = isEnabled
         self.isInteractive = isInteractive
+        self.isFocused = isFocused
+        self.canBecomeFocused = canBecomeFocused
         self.children = children
     }
 }
@@ -104,6 +148,8 @@ public struct LoupeAccessibilityTree: Codable, Equatable {
                 isVisible: source.isVisible,
                 isEnabled: source.isEnabled,
                 isInteractive: source.isInteractive || (accessibility?.traits.contains("button") ?? false),
+                isFocused: source.uiKit?.isFocused,
+                canBecomeFocused: source.uiKit?.canBecomeFocused,
                 children: []
             )
 

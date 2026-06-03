@@ -557,6 +557,56 @@ private var controlMutationDescriptors: [LoupeMutationDescriptor] {
                 throw LoupeMutationError(code: "invalid_value", message: "Segment index \(index) is outside available segments.")
             }
             control.selectedSegment = index
+        },
+        mutation(["slider.value", "appKit.slider.value", "uiKit.slider.value"]) { view, value in
+            guard let slider = view as? NSSlider else {
+                throw unsupportedProperty("slider.value", view: view)
+            }
+            slider.doubleValue = try doubleValue(value)
+        },
+        mutation(["slider.minimumValue", "appKit.slider.minimumValue", "uiKit.slider.minimumValue"]) { view, value in
+            guard let slider = view as? NSSlider else {
+                throw unsupportedProperty("slider.minimumValue", view: view)
+            }
+            slider.minValue = try doubleValue(value)
+        },
+        mutation(["slider.maximumValue", "appKit.slider.maximumValue", "uiKit.slider.maximumValue"]) { view, value in
+            guard let slider = view as? NSSlider else {
+                throw unsupportedProperty("slider.maximumValue", view: view)
+            }
+            slider.maxValue = try doubleValue(value)
+        },
+        mutation(["stepper.value", "appKit.stepper.value", "uiKit.stepper.value"]) { view, value in
+            guard let stepper = view as? NSStepper else {
+                throw unsupportedProperty("stepper.value", view: view)
+            }
+            stepper.doubleValue = try doubleValue(value)
+        },
+        mutation(["stepper.minimumValue", "appKit.stepper.minimumValue", "uiKit.stepper.minimumValue"]) { view, value in
+            guard let stepper = view as? NSStepper else {
+                throw unsupportedProperty("stepper.minimumValue", view: view)
+            }
+            stepper.minValue = try doubleValue(value)
+        },
+        mutation(["stepper.maximumValue", "appKit.stepper.maximumValue", "uiKit.stepper.maximumValue"]) { view, value in
+            guard let stepper = view as? NSStepper else {
+                throw unsupportedProperty("stepper.maximumValue", view: view)
+            }
+            stepper.maxValue = try doubleValue(value)
+        },
+        mutation(["stepper.stepValue", "appKit.stepper.stepValue", "uiKit.stepper.stepValue"]) { view, value in
+            guard let stepper = view as? NSStepper else {
+                throw unsupportedProperty("stepper.stepValue", view: view)
+            }
+            stepper.increment = try doubleValue(value)
+        },
+        mutation(["progressView.progress", "progressView.value", "appKit.progressView.value", "uiKit.progressView.value"]) { view, value in
+            guard let progress = view as? NSProgressIndicator else {
+                throw unsupportedProperty("progressView.progress", view: view)
+            }
+            let range = progress.maxValue - progress.minValue
+            let normalized = try doubleValue(value)
+            progress.doubleValue = range == 0 ? normalized : progress.minValue + normalized * range
         }
     ]
 }
@@ -727,6 +777,24 @@ private func mutationPropertyValue(_ property: String, in node: LoupeNode) -> Lo
         return node.uiKit?.stackView.map { .string($0.axis) }
     case "stack.spacing", "stackview.spacing":
         return node.uiKit?.stackView.map { .double($0.spacing) }
+    case "segmentedcontrol.selectedsegmentindex", "appkit.segmentedcontrol.selectedsegmentindex":
+        return node.uiKit?.segmentedControl?.selectedSegmentIndex.map(LoupeMutationValue.int)
+    case "slider.value", "appkit.slider.value", "uikit.slider.value":
+        return node.uiKit?.slider?.value.map(LoupeMutationValue.double)
+    case "slider.minimumvalue", "appkit.slider.minimumvalue", "uikit.slider.minimumvalue":
+        return node.uiKit?.slider?.minimumValue.map(LoupeMutationValue.double)
+    case "slider.maximumvalue", "appkit.slider.maximumvalue", "uikit.slider.maximumvalue":
+        return node.uiKit?.slider?.maximumValue.map(LoupeMutationValue.double)
+    case "stepper.value", "appkit.stepper.value", "uikit.stepper.value":
+        return node.uiKit?.stepper?.value.map(LoupeMutationValue.double)
+    case "stepper.minimumvalue", "appkit.stepper.minimumvalue", "uikit.stepper.minimumvalue":
+        return node.uiKit?.stepper?.minimumValue.map(LoupeMutationValue.double)
+    case "stepper.maximumvalue", "appkit.stepper.maximumvalue", "uikit.stepper.maximumvalue":
+        return node.uiKit?.stepper?.maximumValue.map(LoupeMutationValue.double)
+    case "stepper.stepvalue", "appkit.stepper.stepvalue", "uikit.stepper.stepvalue":
+        return node.uiKit?.stepper?.stepValue.map(LoupeMutationValue.double)
+    case "progressview.progress", "progressview.value", "appkit.progressview.value", "uikit.progressview.value":
+        return node.uiKit?.progressView?.value.map(LoupeMutationValue.double)
     default:
         return nil
     }
@@ -964,7 +1032,12 @@ private func appKitProperties(for view: NSView) -> LoupeUIKitProperties {
         label: labelProperties(for: view),
         button: buttonProperties(for: view),
         textField: textFieldProperties(for: view),
-        scrollView: scrollViewProperties(for: view)
+        scrollView: scrollViewProperties(for: view),
+        slider: sliderProperties(for: view),
+        stepper: stepperProperties(for: view),
+        segmentedControl: segmentedControlProperties(for: view),
+        progressView: progressViewProperties(for: view),
+        imageView: imageViewProperties(for: view)
     )
 }
 
@@ -1040,10 +1113,12 @@ private func controlProperties(for view: NSView) -> LoupeUIControlProperties? {
 
 @MainActor
 private func buttonProperties(for view: NSView) -> LoupeUIButtonProperties? {
-    guard view is NSButton else {
+    guard let button = view as? NSButton else {
         return nil
     }
-    return LoupeUIButtonProperties()
+    return LoupeUIButtonProperties(
+        lineBreakMode: button.cell.map { lineBreakModeName($0.lineBreakMode) }
+    )
 }
 
 @MainActor
@@ -1066,6 +1141,62 @@ private func textFieldProperties(for view: NSView) -> LoupeUITextFieldProperties
     return LoupeUITextFieldProperties(
         textAlignment: textAlignmentName(textField.alignment),
         borderStyle: textField.isBordered ? "bordered" : "none"
+    )
+}
+
+@MainActor
+private func sliderProperties(for view: NSView) -> LoupeUISliderProperties? {
+    guard let slider = view as? NSSlider else {
+        return nil
+    }
+    return LoupeUISliderProperties(
+        value: finiteDouble(slider.doubleValue),
+        minimumValue: finiteDouble(slider.minValue),
+        maximumValue: finiteDouble(slider.maxValue)
+    )
+}
+
+@MainActor
+private func stepperProperties(for view: NSView) -> LoupeUIStepperProperties? {
+    guard let stepper = view as? NSStepper else {
+        return nil
+    }
+    return LoupeUIStepperProperties(
+        value: finiteDouble(stepper.doubleValue),
+        minimumValue: finiteDouble(stepper.minValue),
+        maximumValue: finiteDouble(stepper.maxValue),
+        stepValue: finiteDouble(stepper.increment)
+    )
+}
+
+@MainActor
+private func segmentedControlProperties(for view: NSView) -> LoupeUISegmentedControlProperties? {
+    guard let control = view as? NSSegmentedControl else {
+        return nil
+    }
+    return LoupeUISegmentedControlProperties(
+        selectedSegmentIndex: control.selectedSegment,
+        segments: (0..<control.segmentCount).map { control.label(forSegment: $0) ?? "" }
+    )
+}
+
+@MainActor
+private func progressViewProperties(for view: NSView) -> LoupeUIProgressViewProperties? {
+    guard let progress = view as? NSProgressIndicator, !progress.isIndeterminate else {
+        return nil
+    }
+    let range = progress.maxValue - progress.minValue
+    let normalized = range == 0 ? progress.doubleValue : (progress.doubleValue - progress.minValue) / range
+    return LoupeUIProgressViewProperties(value: finiteDouble(normalized))
+}
+
+@MainActor
+private func imageViewProperties(for view: NSView) -> LoupeUIImageViewProperties? {
+    guard let imageView = view as? NSImageView else {
+        return nil
+    }
+    return LoupeUIImageViewProperties(
+        imageSize: imageView.image.map { LoupeSize(width: Double($0.size.width), height: Double($0.size.height)) }
     )
 }
 
@@ -1352,6 +1483,12 @@ private func role(for view: NSView) -> String? {
         return "scrollView"
     case is NSSegmentedControl:
         return "segmentedControl"
+    case is NSSlider:
+        return "slider"
+    case is NSStepper:
+        return "stepper"
+    case is NSProgressIndicator:
+        return "progress"
     case is NSImageView:
         return "image"
     default:
@@ -1436,6 +1573,10 @@ private func typeName(of object: AnyObject) -> String {
 private func finiteDouble(_ value: CGFloat) -> Double? {
     let double = Double(value)
     return double.isFinite ? double : nil
+}
+
+private func finiteDouble(_ value: Double) -> Double? {
+    value.isFinite ? value : nil
 }
 
 private func metadataValue(fromDefault value: Any?) -> LoupeMetadataValue? {
