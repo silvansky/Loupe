@@ -109,6 +109,7 @@ import AppKit
         let snapshot = agent.captureSnapshot()
         let appNode = try #require(snapshot.rootRefs.compactMap { snapshot.nodes[$0] }.first)
         let windowNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.windowTestID })
+        let labelNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.labelTestID })
         let buttonNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.buttonTestID })
         let segmentedNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.segmentedTestID })
         let sliderNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.sliderTestID })
@@ -121,7 +122,11 @@ import AppKit
         #expect(appNode.typeName == "NSApplication")
         #expect(windowNode.kind == .window)
         #expect(windowNode.typeName == "NSWindow")
+        #expect(labelNode.typeName == "NSTextField")
+        #expect(labelNode.role == "staticText")
+        #expect(labelNode.isInteractive == false)
         #expect(buttonNode.typeName == "NSButton")
+        #expect(buttonNode.isInteractive == true)
         #expect(buttonNode.text == "Run")
         #expect(buttonNode.custom["fixture"] == .string("appkit"))
         #expect(buttonNode.custom["runtimeTag"] == .string("posted-by-test-id"))
@@ -174,6 +179,16 @@ import AppKit
         #expect(responderReport.responderChain.contains { $0.testID == fixture.buttonTestID })
         #expect(!agent.mutationCapabilities().isEmpty)
 
+        let enabledMutation = try agent.mutate(
+            LoupeMutationRequest(
+                selector: LoupeMutationSelector(kind: .testID, value: fixture.buttonTestID),
+                property: "enabled",
+                value: .bool(false)
+            )
+        )
+        #expect(enabledMutation.effective == .bool(false))
+        #expect(enabledMutation.changed == true)
+
         let segmentedMutation = try agent.mutate(
             LoupeMutationRequest(
                 selector: LoupeMutationSelector(kind: .testID, value: fixture.segmentedTestID),
@@ -199,6 +214,7 @@ import AppKit
 @MainActor
 private final class AppKitFixture {
     let windowTestID = "platform.window"
+    let labelTestID = "platform.staticLabel"
     let buttonTestID = "platform.primaryButton"
     let segmentedTestID = "platform.segmented"
     let sliderTestID = "platform.slider"
@@ -225,6 +241,10 @@ private final class AppKitFixture {
 
         let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 240))
         contentView.identifier = NSUserInterfaceItemIdentifier("platform.content")
+
+        let label = NSTextField(labelWithString: "Static platform label")
+        label.frame = NSRect(x: 80, y: 196, width: 180, height: 24)
+        label.testID(labelTestID)
 
         let button = NSButton(frame: NSRect(x: 80, y: 96, width: 120, height: 44))
         button.title = "Run"
@@ -270,6 +290,7 @@ private final class AppKitFixture {
         )
         nativeAXHost.testID(nativeAXHostTestID)
 
+        contentView.addSubview(label)
         contentView.addSubview(button)
         contentView.addSubview(segmented)
         contentView.addSubview(slider)

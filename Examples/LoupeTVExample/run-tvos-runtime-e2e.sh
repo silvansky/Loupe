@@ -262,7 +262,19 @@ ruby -rjson -e '
   down_trace = ARGV.fetch(19)
   legacy_trace = ARGV.fetch(24)
   logout_trace = ARGV.fetch(25)
-  ["action-before.json", "action-target.json", "action-after.json", "before-snapshot.json", "after-snapshot.json"].each do |name|
+  [
+    "action-before.json",
+    "action-target.json",
+    "action-after.json",
+    "before-snapshot.json",
+    "after-snapshot.json",
+    "before-accessibility.json",
+    "after-accessibility.json",
+    "before-logs.json",
+    "after-logs.json",
+    "before.png",
+    "after.png",
+  ].each do |name|
     abort "missing select press trace #{name}" unless File.exist?(File.join(select_trace, name))
     abort "missing down press trace #{name}" unless File.exist?(File.join(down_trace, name))
     abort "missing legacy press trace #{name}" unless File.exist?(File.join(legacy_trace, name))

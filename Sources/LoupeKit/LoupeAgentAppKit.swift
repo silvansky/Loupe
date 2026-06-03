@@ -960,6 +960,8 @@ private func mutationPropertyValue(_ property: String, in node: LoupeNode) -> Lo
         return node.text.map(LoupeMutationValue.string)
     case "title", "button.title":
         return node.text.map(LoupeMutationValue.string)
+    case "enabled", "isenabled", "control.enabled", "appkit.enabled":
+        return .bool(node.isEnabled)
     case "accessibility.label", "accessibilitylabel", "label":
         return node.accessibility?.label.map(LoupeMutationValue.string) ?? node.label.map(LoupeMutationValue.string)
     case "accessibility.value", "accessibilityvalue":
@@ -1775,6 +1777,9 @@ private func isEnabled(_ view: NSView) -> Bool {
 
 @MainActor
 private func isInteractive(_ view: NSView) -> Bool {
+    if let textField = view as? NSTextField {
+        return textField.isEnabled && (textField.isEditable || textField.isSelectable)
+    }
     if let control = view as? NSControl {
         return control.isEnabled
     }
