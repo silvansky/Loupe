@@ -12,9 +12,10 @@ Core diagnostic loops:
 
 | Question | Loupe loop |
 | --- | --- |
-| What is on screen, and why did this route render? | Capture `ui snapshot`, inspect view and accessibility nodes with `ui query` or `ui node`, then compare `debug logs`, `debug network`, and `debug flags`. |
-| What changed after the agent acted? | Run `act tap`, `act press`, or `act swipe` with `--trace-dir`, then review before/after snapshots, accessibility state, logs, and trace diffs. |
-| Is this a visual, layout, or scroll regression? | Use `ui appearance`, `ui audit`, `ui node`, and `debug scroll` to verify contrast, properties, constraints, content size, and offset changes. |
+| What is on screen, and why did this route render? | Capture `ui snapshot`, inspect view and accessibility nodes with `ui query` or `ui node`, then compare route logs and flags. |
+| Did the app receive the data it rendered? | Use `debug network` to inspect URLSession requests, status codes, response bodies, and app-authored network evidence. |
+| Did runtime data or storage change correctly? | Read `debug defaults`, `debug flags`, and `debug keychain list`, then compare them before and after the flow. |
+| What changed after input or a visual mode switch? | Run `act tap`, `act press`, or `act swipe` with `--trace-dir`; use `ui audit`, `ui node`, and `debug scroll` for contrast, layout, and scroll evidence. |
 
 ## Demo
 
