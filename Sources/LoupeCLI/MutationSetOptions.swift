@@ -25,6 +25,7 @@ struct MutationSetOptions {
         var valueType = "auto"
         var layout = true
         var animate = true
+        var trySelfSizing = false
         var animationDuration = 0.25
         var animationDelay = 0.0
         var animationCurve = "easeInOut"
@@ -85,6 +86,8 @@ struct MutationSetOptions {
                 animate = true
             case "--no-animate":
                 animate = false
+            case "--try-self-sizing":
+                trySelfSizing = true
             case "--duration":
                 animationDuration = try Self.double(after: "--duration", in: arguments, index: &index)
             case "--delay":
@@ -141,7 +144,8 @@ struct MutationSetOptions {
             property: property,
             value: value,
             layout: layout,
-            animation: animation
+            animation: animation,
+            trySelfSizing: trySelfSizing
         )
     }
 
@@ -153,6 +157,7 @@ struct MutationSetOptions {
            loupe ui set --test-id card frame --rect 20,120,220,80
            loupe ui set --test-id card frame --rect 20,120,220,80 --duration 0.3
            loupe ui set --test-id card frame --rect 20,120,220,80 --no-animate
+           loupe ui set --test-id cell.title layout.hugging.vertical 251 --try-self-sizing
     """
 
     private static func mutationValue(_ rawValue: String, type: String, property: String) throws -> LoupeMutationValue {

@@ -3395,9 +3395,20 @@ struct LoupeCLI {
             "set ref=\(response.target.ref)",
             "property=\(response.property)",
             "changed=\(response.changed.map { $0 ? "true" : "false" } ?? "unknown")",
+            response.selfSizingProbe.map { "selfSizing=\(selfSizingProbeSummary($0))" },
             response.warning.map { "warning=\"\($0)\"" },
             outputURL.map { "output=\($0.path)" },
         ].compactMap(\.self).joined(separator: " ")
+    }
+
+    private static func selfSizingProbeSummary(_ probe: LoupeSelfSizingProbeResult) -> String {
+        if probe.attempted {
+            return probe.applied ? "applied" : "failed"
+        }
+        if probe.applied {
+            return "already-enabled"
+        }
+        return "skipped:\(probe.reason ?? "not-applicable")"
     }
 
     private static func renderWaitForValueSummary(

@@ -50,4 +50,15 @@ import Testing
 
         #expect(options.request.value == .string("20260519"))
     }
+
+    @Test func trySelfSizingOptInIsParsed() throws {
+        let options = try MutationSetOptions([
+            "--test-id", "cell.title",
+            "layout.hugging.vertical",
+            "251",
+            "--try-self-sizing",
+        ])
+
+        #expect(options.request.trySelfSizing)
+    }
 }

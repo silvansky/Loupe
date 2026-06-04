@@ -308,6 +308,72 @@ public struct LoupeUIActivityIndicatorProperties: Codable, Equatable {
     }
 }
 
+public struct LoupeUICollectionFlowLayoutProperties: Codable, Equatable {
+    public var itemSize: LoupeSize
+    public var estimatedItemSize: LoupeSize
+    public var usesEstimatedItemSize: Bool
+    public var usesAutomaticItemSize: Bool
+
+    public init(
+        itemSize: LoupeSize,
+        estimatedItemSize: LoupeSize,
+        usesEstimatedItemSize: Bool,
+        usesAutomaticItemSize: Bool
+    ) {
+        self.itemSize = itemSize
+        self.estimatedItemSize = estimatedItemSize
+        self.usesEstimatedItemSize = usesEstimatedItemSize
+        self.usesAutomaticItemSize = usesAutomaticItemSize
+    }
+}
+
+public struct LoupeUICollectionViewProperties: Codable, Equatable {
+    public var selfSizingInvalidation: String?
+    public var layoutClassName: String
+    public var delegateRespondsToSizeForItemAt: Bool
+    public var flowLayout: LoupeUICollectionFlowLayoutProperties?
+
+    public init(
+        selfSizingInvalidation: String? = nil,
+        layoutClassName: String,
+        delegateRespondsToSizeForItemAt: Bool,
+        flowLayout: LoupeUICollectionFlowLayoutProperties? = nil
+    ) {
+        self.selfSizingInvalidation = selfSizingInvalidation
+        self.layoutClassName = layoutClassName
+        self.delegateRespondsToSizeForItemAt = delegateRespondsToSizeForItemAt
+        self.flowLayout = flowLayout
+    }
+}
+
+public struct LoupeUITableViewProperties: Codable, Equatable {
+    public var selfSizingInvalidation: String?
+    public var rowHeight: Double
+    public var estimatedRowHeight: Double
+    public var usesAutomaticRowHeight: Bool
+    public var usesEstimatedRowHeight: Bool
+    public var delegateRespondsToHeightForRowAt: Bool
+    public var delegateRespondsToEstimatedHeightForRowAt: Bool
+
+    public init(
+        selfSizingInvalidation: String? = nil,
+        rowHeight: Double,
+        estimatedRowHeight: Double,
+        usesAutomaticRowHeight: Bool,
+        usesEstimatedRowHeight: Bool,
+        delegateRespondsToHeightForRowAt: Bool,
+        delegateRespondsToEstimatedHeightForRowAt: Bool
+    ) {
+        self.selfSizingInvalidation = selfSizingInvalidation
+        self.rowHeight = rowHeight
+        self.estimatedRowHeight = estimatedRowHeight
+        self.usesAutomaticRowHeight = usesAutomaticRowHeight
+        self.usesEstimatedRowHeight = usesEstimatedRowHeight
+        self.delegateRespondsToHeightForRowAt = delegateRespondsToHeightForRowAt
+        self.delegateRespondsToEstimatedHeightForRowAt = delegateRespondsToEstimatedHeightForRowAt
+    }
+}
+
 public struct LoupeUIImageViewProperties: Codable, Equatable {
     public var imageSize: LoupeSize?
 
@@ -504,6 +570,8 @@ public struct LoupeUIKitProperties: Codable, Equatable {
     public var pageControl: LoupeUIPageControlProperties?
     public var progressView: LoupeUIProgressViewProperties?
     public var activityIndicator: LoupeUIActivityIndicatorProperties?
+    public var collectionView: LoupeUICollectionViewProperties?
+    public var tableView: LoupeUITableViewProperties?
     public var imageView: LoupeUIImageViewProperties?
     public var pickerView: LoupeUIPickerViewProperties?
     public var tabBar: LoupeUITabBarProperties?
@@ -540,6 +608,8 @@ public struct LoupeUIKitProperties: Codable, Equatable {
         pageControl: LoupeUIPageControlProperties? = nil,
         progressView: LoupeUIProgressViewProperties? = nil,
         activityIndicator: LoupeUIActivityIndicatorProperties? = nil,
+        collectionView: LoupeUICollectionViewProperties? = nil,
+        tableView: LoupeUITableViewProperties? = nil,
         imageView: LoupeUIImageViewProperties? = nil,
         pickerView: LoupeUIPickerViewProperties? = nil,
         tabBar: LoupeUITabBarProperties? = nil,
@@ -575,6 +645,8 @@ public struct LoupeUIKitProperties: Codable, Equatable {
         self.pageControl = pageControl
         self.progressView = progressView
         self.activityIndicator = activityIndicator
+        self.collectionView = collectionView
+        self.tableView = tableView
         self.imageView = imageView
         self.pickerView = pickerView
         self.tabBar = tabBar

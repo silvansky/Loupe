@@ -547,6 +547,14 @@ final class ComponentsViewController: UIViewController {
         layout.minimumLineSpacing = 8
         return UICollectionView(frame: .zero, collectionViewLayout: layout)
     }()
+    private lazy var selfSizingCollectionView: UICollectionView = {
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.estimatedItemSize = CGSize(width: 96, height: 44)
+        layout.minimumInteritemSpacing = 8
+        layout.minimumLineSpacing = 8
+        return UICollectionView(frame: .zero, collectionViewLayout: layout)
+    }()
     private let pickerView = UIPickerView()
     private let pageControl = UIPageControl()
     private let progressView = UIProgressView(progressViewStyle: .default)
@@ -557,6 +565,7 @@ final class ComponentsViewController: UIViewController {
     private let primaryButton = UIButton(type: .system)
     private let designCard = UIView()
     private let componentTiles = ["Label", "Image", "Control", "Input", "List"]
+    private let selfSizingTiles = ["Short", "Adaptive title", "Wide"]
     private let pickerRows = ["North", "South", "West"]
     private var didSendLoupeComponentLog = false
 
@@ -668,6 +677,13 @@ final class ComponentsViewController: UIViewController {
         collectionView.register(ComponentTileCell.self, forCellWithReuseIdentifier: ComponentTileCell.reuseIdentifier)
         collectionView.accessibilityIdentifier = "example.components.collectionView"
 
+        selfSizingCollectionView.dataSource = self
+        selfSizingCollectionView.delegate = self
+        selfSizingCollectionView.backgroundColor = .secondarySystemBackground
+        selfSizingCollectionView.layer.cornerRadius = 8
+        selfSizingCollectionView.register(ComponentTileCell.self, forCellWithReuseIdentifier: ComponentTileCell.reuseIdentifier)
+        selfSizingCollectionView.accessibilityIdentifier = "example.components.selfSizingCollectionView"
+
         pickerView.dataSource = self
         pickerView.delegate = self
         pickerView.selectRow(1, inComponent: 0, animated: false)
@@ -750,6 +766,7 @@ final class ComponentsViewController: UIViewController {
             dateRow,
             tabBar,
             collectionView,
+            selfSizingCollectionView,
             pickerView,
             pageControl,
             progressRow,
@@ -778,6 +795,7 @@ final class ComponentsViewController: UIViewController {
             symbolImageView.heightAnchor.constraint(equalToConstant: 36),
             tabBar.heightAnchor.constraint(equalToConstant: 52),
             collectionView.heightAnchor.constraint(equalToConstant: 72),
+            selfSizingCollectionView.heightAnchor.constraint(equalToConstant: 72),
             pickerView.heightAnchor.constraint(equalToConstant: 120),
             noteView.heightAnchor.constraint(equalToConstant: 96),
             alertButton.heightAnchor.constraint(equalToConstant: 44),
@@ -823,7 +841,10 @@ final class ComponentsViewController: UIViewController {
 
 extension ComponentsViewController: UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        componentTiles.count
+        if collectionView === selfSizingCollectionView {
+            return selfSizingTiles.count
+        }
+        return componentTiles.count
     }
 
     func collectionView(
@@ -834,7 +855,15 @@ extension ComponentsViewController: UICollectionViewDataSource, UICollectionView
             withReuseIdentifier: ComponentTileCell.reuseIdentifier,
             for: indexPath
         ) as! ComponentTileCell
-        cell.configure(text: componentTiles[indexPath.item], index: indexPath.item)
+        if collectionView === selfSizingCollectionView {
+            cell.configure(
+                text: selfSizingTiles[indexPath.item],
+                index: indexPath.item,
+                idPrefix: "example.components.selfSizingCollection"
+            )
+        } else {
+            cell.configure(text: componentTiles[indexPath.item], index: indexPath.item)
+        }
         return cell
     }
 }
@@ -871,10 +900,10 @@ final class ComponentTileCell: UICollectionViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(text: String, index: Int) {
+    func configure(text: String, index: Int, idPrefix: String = "example.components.collection") {
         titleLabel.text = text
-        accessibilityIdentifier = "example.components.collection.\(index)"
-        titleLabel.accessibilityIdentifier = "example.components.collection.\(index).label"
+        accessibilityIdentifier = "\(idPrefix).\(index)"
+        titleLabel.accessibilityIdentifier = "\(idPrefix).\(index).label"
     }
 
     private func configure() {
@@ -891,6 +920,8 @@ final class ComponentTileCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
             titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
         ])
     }

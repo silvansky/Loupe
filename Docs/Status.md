@@ -35,6 +35,10 @@ runtime servers.
 - Try allowlisted UIKit property mutations at runtime with `loupe ui set` and
   `loupe ui set-many`; property mutations animate by default and report effective
   state.
+- Probe UIKit collection/table self-sizing during runtime mutations with
+  `--try-self-sizing` on iOS 16+ when Loupe can identify a supported list
+  sizing context. Repeated probes on an already-enabled container no-op and
+  report `already-enabled`.
 - Inspect and mutate Auto Layout constraints with `loupe ui constraints`,
   `loupe ui set-constraint`, and `loupe ui deactivate-constraint`, including effective-state
   verification.
@@ -105,6 +109,9 @@ clipping, and UIKit metadata.
 - Layout-owned frame and Auto Layout mutations may be restored by UIKit. Loupe
   reports requested and effective state; only effective changes should guide
   source edits.
+- Collection/table self-sizing probes are diagnostic and deliberately narrow:
+  fixed item sizes, delegate-owned row heights, custom collection layouts, and
+  unsupported OS versions are skipped with a reason.
 
 ## Source Of Truth
 

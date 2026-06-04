@@ -110,19 +110,41 @@ public struct LoupeMutationRequest: Codable, Equatable {
     public var value: LoupeMutationValue
     public var layout: Bool
     public var animation: LoupeMutationAnimation?
+    public var trySelfSizing: Bool
 
     public init(
         selector: LoupeMutationSelector,
         property: String,
         value: LoupeMutationValue,
         layout: Bool = true,
-        animation: LoupeMutationAnimation? = nil
+        animation: LoupeMutationAnimation? = nil,
+        trySelfSizing: Bool = false
     ) {
         self.selector = selector
         self.property = property
         self.value = value
         self.layout = layout
         self.animation = animation
+        self.trySelfSizing = trySelfSizing
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case selector
+        case property
+        case value
+        case layout
+        case animation
+        case trySelfSizing
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selector = try container.decode(LoupeMutationSelector.self, forKey: .selector)
+        property = try container.decode(String.self, forKey: .property)
+        value = try container.decode(LoupeMutationValue.self, forKey: .value)
+        layout = try container.decodeIfPresent(Bool.self, forKey: .layout) ?? true
+        animation = try container.decodeIfPresent(LoupeMutationAnimation.self, forKey: .animation)
+        trySelfSizing = try container.decodeIfPresent(Bool.self, forKey: .trySelfSizing) ?? false
     }
 }
 
@@ -151,6 +173,7 @@ public struct LoupeMutationResponse: Codable, Equatable {
     public var changed: Bool?
     public var animation: LoupeMutationAnimation?
     public var warning: String?
+    public var selfSizingProbe: LoupeSelfSizingProbeResult?
     public var snapshotID: String
 
     public init(
@@ -166,6 +189,7 @@ public struct LoupeMutationResponse: Codable, Equatable {
         changed: Bool? = nil,
         animation: LoupeMutationAnimation? = nil,
         warning: String? = nil,
+        selfSizingProbe: LoupeSelfSizingProbeResult? = nil,
         snapshotID: String
     ) {
         self.property = property
@@ -180,7 +204,91 @@ public struct LoupeMutationResponse: Codable, Equatable {
         self.changed = changed
         self.animation = animation
         self.warning = warning
+        self.selfSizingProbe = selfSizingProbe
         self.snapshotID = snapshotID
+    }
+}
+
+public struct LoupeListSizingContext: Codable, Equatable {
+    public var containerRef: String?
+    public var containerTestID: String?
+    public var containerKind: String
+    public var containerTypeName: String
+    public var cellRef: String?
+    public var cellTestID: String?
+    public var cellTypeName: String?
+    public var targetDepthFromCell: Int?
+    public var sizingOwner: String
+    public var selfSizingInvalidation: String?
+    public var canAttemptSelfSizing: Bool
+    public var signals: [String]
+
+    public init(
+        containerRef: String? = nil,
+        containerTestID: String? = nil,
+        containerKind: String,
+        containerTypeName: String,
+        cellRef: String? = nil,
+        cellTestID: String? = nil,
+        cellTypeName: String? = nil,
+        targetDepthFromCell: Int? = nil,
+        sizingOwner: String,
+        selfSizingInvalidation: String? = nil,
+        canAttemptSelfSizing: Bool,
+        signals: [String] = []
+    ) {
+        self.containerRef = containerRef
+        self.containerTestID = containerTestID
+        self.containerKind = containerKind
+        self.containerTypeName = containerTypeName
+        self.cellRef = cellRef
+        self.cellTestID = cellTestID
+        self.cellTypeName = cellTypeName
+        self.targetDepthFromCell = targetDepthFromCell
+        self.sizingOwner = sizingOwner
+        self.selfSizingInvalidation = selfSizingInvalidation
+        self.canAttemptSelfSizing = canAttemptSelfSizing
+        self.signals = signals
+    }
+}
+
+public struct LoupeSelfSizingProbeResult: Codable, Equatable {
+    public var requested: Bool
+    public var attempted: Bool
+    public var applied: Bool
+    public var reason: String?
+    public var previousMode: String?
+    public var effectiveMode: String?
+    public var beforeContainerContentSize: LoupeSize?
+    public var afterContainerContentSize: LoupeSize?
+    public var beforeCellFrame: LoupeRect?
+    public var afterCellFrame: LoupeRect?
+    public var context: LoupeListSizingContext?
+
+    public init(
+        requested: Bool,
+        attempted: Bool,
+        applied: Bool,
+        reason: String? = nil,
+        previousMode: String? = nil,
+        effectiveMode: String? = nil,
+        beforeContainerContentSize: LoupeSize? = nil,
+        afterContainerContentSize: LoupeSize? = nil,
+        beforeCellFrame: LoupeRect? = nil,
+        afterCellFrame: LoupeRect? = nil,
+        context: LoupeListSizingContext? = nil
+    ) {
+        self.requested = requested
+        self.attempted = attempted
+        self.applied = applied
+        self.reason = reason
+        self.previousMode = previousMode
+        self.effectiveMode = effectiveMode
+        self.beforeContainerContentSize = beforeContainerContentSize
+        self.afterContainerContentSize = afterContainerContentSize
+        self.beforeCellFrame = beforeCellFrame
+        self.afterCellFrame = afterCellFrame
+        self.context = context
     }
 }
 

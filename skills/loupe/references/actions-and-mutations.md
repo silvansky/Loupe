@@ -34,6 +34,7 @@ within the same observed screen.
 ```bash
 loupe ui mutations --host <runtime-host> --test-id target.view
 loupe ui set --host <runtime-host> --test-id target.view alpha 0.5 --no-animate
+loupe ui set --host <runtime-host> --test-id cell.title layout.hugging.horizontal 260 --try-self-sizing --no-animate
 loupe ui set-many --host <runtime-host> --file /tmp/mutations.json --trace-dir /tmp/loupe-mutation-trace
 loupe act wait value --host <runtime-host> --test-id target.view alpha 0.5
 loupe ui reflect --host <runtime-host> --test-id target.view
@@ -41,6 +42,14 @@ loupe ui reflect --host <runtime-host> --test-id target.view
 
 Use `--no-animate` when verification needs immediate state. Treat frame and Auto
 Layout mutations as probes until `loupe ui node` confirms the effective state.
+For collection/table cells on iOS 16+, `--try-self-sizing` only attempts UIKit's
+self-sizing invalidation when Loupe can identify a supported list context:
+flow-layout collection views with estimated item size, or automatic-height
+tables without delegate-owned row heights. It returns `selfSizingProbe` with the
+nearest container/cell, sizing owner, before/after frames, and the reason when
+it skips. If the result is `already-enabled`, do not repeat the self-sizing
+probe for the same container; continue with normal mutations and fresh
+effective-state checks.
 
 ## Design QA
 

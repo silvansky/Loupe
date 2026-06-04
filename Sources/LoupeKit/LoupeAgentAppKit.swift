@@ -268,6 +268,14 @@ public final class LoupeAgent {
         }
         let effective = mutationPropertyValue(request.property, in: afterNode)
         let changed = effective.map { mutationValuesApproximatelyEqual(request.value, $0) }
+        let selfSizingProbe = request.trySelfSizing
+            ? LoupeSelfSizingProbeResult(
+                requested: true,
+                attempted: false,
+                applied: false,
+                reason: "unsupported_platform_appkit"
+            )
+            : nil
 
         return LoupeMutationResponse(
             property: request.property,
@@ -281,6 +289,8 @@ public final class LoupeAgent {
             effective: effective,
             changed: changed,
             animation: request.animation,
+            warning: selfSizingProbe.map { "trySelfSizing skipped: \($0.reason ?? "unsupported_platform_appkit")." },
+            selfSizingProbe: selfSizingProbe,
             snapshotID: afterCapture.snapshot.id
         )
     }

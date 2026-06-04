@@ -88,6 +88,11 @@ public extension LoupeAgent {
             )
         }
 
+        let selfSizingProbe = prepareSelfSizingProbe(
+            request: request,
+            targetView: view,
+            capture: beforeCapture
+        )
         try applyMutation(
             property: request.property,
             value: request.value,
@@ -95,6 +100,7 @@ public extension LoupeAgent {
             layout: request.layout,
             animation: request.animation
         )
+        triggerSelfSizingInvalidation(selfSizingProbe, targetView: view)
 
         LoupeRuntime.shared.log(
             level: "info",
@@ -111,11 +117,13 @@ public extension LoupeAgent {
         }
         let effective = mutationPropertyValue(request.property, in: afterNode)
         let changed = effective.map { mutationValuesApproximatelyEqual(request.value, $0) }
+        let finalSelfSizingProbe = completeSelfSizingProbe(selfSizingProbe, afterCapture: afterCapture)
         let warning = mutationWarning(
             request: request,
             targetRef: target.ref,
             changed: changed,
-            snapshot: afterCapture.snapshot
+            snapshot: afterCapture.snapshot,
+            selfSizingProbe: finalSelfSizingProbe
         )
 
         return LoupeMutationResponse(
@@ -131,6 +139,7 @@ public extension LoupeAgent {
             changed: changed,
             animation: request.animation,
             warning: warning,
+            selfSizingProbe: finalSelfSizingProbe,
             snapshotID: afterCapture.snapshot.id
         )
     }
@@ -245,7 +254,8 @@ private func mutationWarning(
     request: LoupeMutationRequest,
     targetRef: String,
     changed: Bool?,
-    snapshot: LoupeSnapshot
+    snapshot: LoupeSnapshot,
+    selfSizingProbe: LoupeSelfSizingProbeResult? = nil
 ) -> String? {
     var warnings: [String] = []
     if changed == false {
@@ -254,6 +264,11 @@ private func mutationWarning(
     if normalizedMutationProperty(request.property) == "backgroundcolor",
        let coverageWarning = backgroundPaintCoverageWarning(targetRef: targetRef, snapshot: snapshot) {
         warnings.append(coverageWarning)
+    }
+    if let selfSizingProbe, selfSizingProbe.requested, !selfSizingProbe.attempted, !selfSizingProbe.applied {
+        warnings.append("trySelfSizing skipped: \(selfSizingProbe.reason ?? "not_applicable").")
+    } else if let selfSizingProbe, selfSizingProbe.attempted, !selfSizingProbe.applied {
+        warnings.append("trySelfSizing did not apply: \(selfSizingProbe.reason ?? "unknown").")
     }
     return warnings.isEmpty ? nil : warnings.joined(separator: " ")
 }
@@ -279,6 +294,377 @@ private func framesApproximatelyEqual(_ lhs: LoupeRect, _ rhs: LoupeRect, tolera
         && abs(lhs.y - rhs.y) <= tolerance
         && abs(lhs.width - rhs.width) <= tolerance
         && abs(lhs.height - rhs.height) <= tolerance
+}
+
+private struct RuntimeSelfSizingProbe {
+    var result: LoupeSelfSizingProbeResult
+    var containerView: UIView?
+    var cellView: UIView?
+}
+
+private struct RuntimeListSizingDecision {
+    var sizingOwner: String
+    var canAttempt: Bool
+    var reason: String?
+    var signals: [String]
+}
+
+@MainActor
+private func prepareSelfSizingProbe(
+    request: LoupeMutationRequest,
+    targetView: UIView,
+    capture: CapturedSnapshot
+) -> RuntimeSelfSizingProbe? {
+    guard request.trySelfSizing else {
+        return nil
+    }
+    guard let context = runtimeListSizingContext(targetView: targetView, capture: capture) else {
+        return RuntimeSelfSizingProbe(
+            result: LoupeSelfSizingProbeResult(
+                requested: true,
+                attempted: false,
+                applied: false,
+                reason: "target_not_in_collection_or_table"
+            ),
+            containerView: nil,
+            cellView: nil
+        )
+    }
+    guard context.context.canAttemptSelfSizing else {
+        return RuntimeSelfSizingProbe(
+            result: LoupeSelfSizingProbeResult(
+                requested: true,
+                attempted: false,
+                applied: false,
+                reason: context.reason ?? "self_sizing_not_applicable",
+                beforeContainerContentSize: contentSize(for: context.containerView),
+                beforeCellFrame: context.cellView.flatMap(frameInScreen(for:)),
+                context: context.context
+            ),
+            containerView: context.containerView,
+            cellView: context.cellView
+        )
+    }
+
+    let previousMode = currentSelfSizingInvalidationMode(for: context.containerView)
+    if previousMode == "enabledIncludingConstraints" {
+        return RuntimeSelfSizingProbe(
+            result: LoupeSelfSizingProbeResult(
+                requested: true,
+                attempted: false,
+                applied: true,
+                reason: "already_enabledIncludingConstraints",
+                previousMode: previousMode,
+                effectiveMode: previousMode,
+                beforeContainerContentSize: contentSize(for: context.containerView),
+                beforeCellFrame: context.cellView.flatMap(frameInScreen(for:)),
+                context: context.context
+            ),
+            containerView: context.containerView,
+            cellView: context.cellView
+        )
+    }
+    let applied = enableSelfSizingInvalidationIncludingConstraints(on: context.containerView)
+    let effectiveMode = currentSelfSizingInvalidationMode(for: context.containerView)
+    return RuntimeSelfSizingProbe(
+        result: LoupeSelfSizingProbeResult(
+            requested: true,
+            attempted: true,
+            applied: applied,
+            reason: applied ? nil : "self_sizing_invalidation_unavailable",
+            previousMode: previousMode,
+            effectiveMode: effectiveMode,
+            beforeContainerContentSize: contentSize(for: context.containerView),
+            beforeCellFrame: context.cellView.flatMap(frameInScreen(for:)),
+            context: context.context
+        ),
+        containerView: context.containerView,
+        cellView: context.cellView
+    )
+}
+
+@MainActor
+private func triggerSelfSizingInvalidation(_ probe: RuntimeSelfSizingProbe?, targetView: UIView) {
+    guard let probe, probe.result.attempted, probe.result.applied, let containerView = probe.containerView else {
+        return
+    }
+
+    targetView.invalidateIntrinsicContentSize()
+    targetView.superview?.invalidateIntrinsicContentSize()
+
+    if let collectionCell = probe.cellView as? UICollectionViewCell {
+        collectionCell.contentView.invalidateIntrinsicContentSize()
+        collectionCell.setNeedsLayout()
+        collectionCell.contentView.setNeedsLayout()
+    } else if let tableCell = probe.cellView as? UITableViewCell {
+        tableCell.contentView.invalidateIntrinsicContentSize()
+        tableCell.setNeedsLayout()
+        tableCell.contentView.setNeedsLayout()
+    }
+
+    if let collectionView = containerView as? UICollectionView {
+        collectionView.collectionViewLayout.invalidateLayout()
+        collectionView.setNeedsLayout()
+        collectionView.layoutIfNeeded()
+    } else if let tableView = containerView as? UITableView {
+        tableView.beginUpdates()
+        tableView.endUpdates()
+        tableView.setNeedsLayout()
+        tableView.layoutIfNeeded()
+    }
+
+    layoutRuntimeWindows()
+}
+
+@MainActor
+private func completeSelfSizingProbe(
+    _ probe: RuntimeSelfSizingProbe?,
+    afterCapture: CapturedSnapshot
+) -> LoupeSelfSizingProbeResult? {
+    guard var probe else {
+        return nil
+    }
+
+    if let containerView = probe.containerView {
+        probe.result.afterContainerContentSize = contentSize(for: containerView)
+        probe.result.effectiveMode = currentSelfSizingInvalidationMode(for: containerView)
+    }
+    if let cellView = probe.cellView {
+        probe.result.afterCellFrame = frameInScreen(for: cellView)
+    }
+    if let containerView = probe.containerView,
+       let containerRef = afterCapture.viewRefs[ObjectIdentifier(containerView)],
+       let afterNode = afterCapture.snapshot.nodes[containerRef] {
+        probe.result.afterContainerContentSize = afterNode.uiKit?.scrollView?.contentSize
+    }
+    if let cellView = probe.cellView,
+       let cellRef = afterCapture.viewRefs[ObjectIdentifier(cellView)],
+       let afterNode = afterCapture.snapshot.nodes[cellRef] {
+        probe.result.afterCellFrame = afterNode.frame
+    }
+    return probe.result
+}
+
+private struct RuntimeListSizingContext {
+    var containerView: UIView
+    var cellView: UIView?
+    var context: LoupeListSizingContext
+    var reason: String?
+}
+
+@MainActor
+private func runtimeListSizingContext(
+    targetView: UIView,
+    capture: CapturedSnapshot
+) -> RuntimeListSizingContext? {
+    var current: UIView? = targetView
+    var depth = 0
+    var cellView: UIView?
+    var depthFromCell: Int?
+
+    while let view = current {
+        if cellView == nil, view is UICollectionViewCell || view is UITableViewCell {
+            cellView = view
+            depthFromCell = depth
+        }
+        if view is UICollectionView || view is UITableView {
+            let decision = listSizingDecision(for: view)
+            let containerRef = capture.viewRefs[ObjectIdentifier(view)]
+            let cellRef = cellView.flatMap { capture.viewRefs[ObjectIdentifier($0)] }
+            let containerNode = containerRef.flatMap { capture.snapshot.nodes[$0] }
+            let cellNode = cellRef.flatMap { capture.snapshot.nodes[$0] }
+            let context = LoupeListSizingContext(
+                containerRef: containerRef,
+                containerTestID: containerNode?.testID ?? view.accessibilityIdentifier,
+                containerKind: view is UICollectionView ? "collectionView" : "tableView",
+                containerTypeName: typeName(of: view),
+                cellRef: cellRef,
+                cellTestID: cellNode?.testID ?? cellView?.accessibilityIdentifier,
+                cellTypeName: cellView.map(typeName(of:)),
+                targetDepthFromCell: depthFromCell,
+                sizingOwner: decision.sizingOwner,
+                selfSizingInvalidation: currentSelfSizingInvalidationMode(for: view),
+                canAttemptSelfSizing: decision.canAttempt,
+                signals: decision.signals
+            )
+            return RuntimeListSizingContext(
+                containerView: view,
+                cellView: cellView,
+                context: context,
+                reason: decision.reason
+            )
+        }
+        current = view.superview
+        depth += 1
+    }
+
+    return nil
+}
+
+@MainActor
+private func listSizingDecision(for view: UIView) -> RuntimeListSizingDecision {
+    if let collectionView = view as? UICollectionView {
+        return collectionViewSizingDecision(collectionView)
+    }
+    if let tableView = view as? UITableView {
+        return tableViewSizingDecision(tableView)
+    }
+    return RuntimeListSizingDecision(
+        sizingOwner: "notList",
+        canAttempt: false,
+        reason: "target_not_in_collection_or_table",
+        signals: []
+    )
+}
+
+@MainActor
+private func collectionViewSizingDecision(_ collectionView: UICollectionView) -> RuntimeListSizingDecision {
+    var signals = [
+        "layoutClass=\(typeName(of: collectionView.collectionViewLayout))",
+        "selfSizingInvalidation=\(collectionViewSelfSizingInvalidationName(collectionView) ?? "unsupported")",
+        "delegateRespondsToSizeForItemAt=\(collectionViewDelegateRespondsToSizeForItemAt(collectionView))",
+    ]
+
+    guard collectionViewSelfSizingInvalidationName(collectionView) != nil else {
+        return RuntimeListSizingDecision(
+            sizingOwner: "unsupportedOS",
+            canAttempt: false,
+            reason: "self_sizing_invalidation_requires_ios_tvos_16",
+            signals: signals
+        )
+    }
+    if collectionViewDelegateRespondsToSizeForItemAt(collectionView) {
+        return RuntimeListSizingDecision(
+            sizingOwner: "delegateSizeForItem",
+            canAttempt: false,
+            reason: "delegate_size_for_item_owns_cell_size",
+            signals: signals
+        )
+    }
+    guard let flowLayout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else {
+        return RuntimeListSizingDecision(
+            sizingOwner: "customCollectionLayout",
+            canAttempt: false,
+            reason: "collection_layout_sizing_unknown",
+            signals: signals
+        )
+    }
+
+    let usesEstimated = flowLayout.estimatedItemSize != .zero
+    let usesAutomatic = flowLayout.itemSize == UICollectionViewFlowLayout.automaticSize
+    signals.append("estimatedItemSize=\(formatSize(flowLayout.estimatedItemSize))")
+    signals.append("itemSize=\(formatSize(flowLayout.itemSize))")
+    signals.append("usesEstimatedItemSize=\(usesEstimated)")
+    signals.append("usesAutomaticItemSize=\(usesAutomatic)")
+
+    if usesEstimated || usesAutomatic {
+        return RuntimeListSizingDecision(
+            sizingOwner: usesAutomatic ? "automaticFlowLayoutSelfSizing" : "estimatedFlowLayoutSelfSizing",
+            canAttempt: true,
+            reason: nil,
+            signals: signals
+        )
+    }
+
+    return RuntimeListSizingDecision(
+        sizingOwner: "fixedFlowLayoutItemSize",
+        canAttempt: false,
+        reason: "flow_layout_item_size_is_fixed",
+        signals: signals
+    )
+}
+
+@MainActor
+private func tableViewSizingDecision(_ tableView: UITableView) -> RuntimeListSizingDecision {
+    let heightDelegate = tableViewDelegateResponds(tableView, selector: #selector(UITableViewDelegate.tableView(_:heightForRowAt:)))
+    let estimatedDelegate = tableViewDelegateResponds(tableView, selector: #selector(UITableViewDelegate.tableView(_:estimatedHeightForRowAt:)))
+    let signals = [
+        "selfSizingInvalidation=\(tableViewSelfSizingInvalidationName(tableView) ?? "unsupported")",
+        "rowHeight=\(formatCGFloat(tableView.rowHeight))",
+        "estimatedRowHeight=\(formatCGFloat(tableView.estimatedRowHeight))",
+        "delegateRespondsToHeightForRowAt=\(heightDelegate)",
+        "delegateRespondsToEstimatedHeightForRowAt=\(estimatedDelegate)",
+    ]
+
+    guard tableViewSelfSizingInvalidationName(tableView) != nil else {
+        return RuntimeListSizingDecision(
+            sizingOwner: "unsupportedOS",
+            canAttempt: false,
+            reason: "self_sizing_invalidation_requires_ios_tvos_16",
+            signals: signals
+        )
+    }
+    if heightDelegate {
+        return RuntimeListSizingDecision(
+            sizingOwner: "delegateHeightForRow",
+            canAttempt: false,
+            reason: "delegate_height_for_row_owns_cell_size",
+            signals: signals
+        )
+    }
+    if tableView.rowHeight == UITableView.automaticDimension || tableView.estimatedRowHeight > 0 {
+        return RuntimeListSizingDecision(
+            sizingOwner: "tableAutomaticDimension",
+            canAttempt: true,
+            reason: nil,
+            signals: signals
+        )
+    }
+    return RuntimeListSizingDecision(
+        sizingOwner: "fixedTableRowHeight",
+        canAttempt: false,
+        reason: "table_row_height_is_fixed",
+        signals: signals
+    )
+}
+
+@MainActor
+private func enableSelfSizingInvalidationIncludingConstraints(on view: UIView) -> Bool {
+    if #available(iOS 16.0, tvOS 16.0, visionOS 1.0, *) {
+        if let collectionView = view as? UICollectionView {
+            collectionView.selfSizingInvalidation = .enabledIncludingConstraints
+            return collectionView.selfSizingInvalidation == .enabledIncludingConstraints
+        }
+        if let tableView = view as? UITableView {
+            tableView.selfSizingInvalidation = .enabledIncludingConstraints
+            return tableView.selfSizingInvalidation == .enabledIncludingConstraints
+        }
+    }
+    return false
+}
+
+@MainActor
+private func currentSelfSizingInvalidationMode(for view: UIView) -> String? {
+    if let collectionView = view as? UICollectionView {
+        return collectionViewSelfSizingInvalidationName(collectionView)
+    }
+    if let tableView = view as? UITableView {
+        return tableViewSelfSizingInvalidationName(tableView)
+    }
+    return nil
+}
+
+@MainActor
+private func contentSize(for view: UIView) -> LoupeSize? {
+    guard let scrollView = view as? UIScrollView else {
+        return nil
+    }
+    return LoupeSize(
+        width: finiteDouble(Double(scrollView.contentSize.width)) ?? 0,
+        height: finiteDouble(Double(scrollView.contentSize.height)) ?? 0
+    )
+}
+
+private func formatSize(_ size: CGSize) -> String {
+    "\(formatCGFloat(size.width))x\(formatCGFloat(size.height))"
+}
+
+private func formatCGFloat(_ value: CGFloat) -> String {
+    let double = Double(value)
+    if double.rounded() == double {
+        return "\(Int(double))"
+    }
+    return String(format: "%.2f", double)
 }
 
 @MainActor
@@ -505,6 +891,10 @@ private func mutationPropertyValue(_ property: String, in node: LoupeNode) -> Lo
         return node.uiKit?.scrollView.map { .bool($0.showsHorizontalScrollIndicator) }
     case "showsverticalscrollindicator":
         return node.uiKit?.scrollView.map { .bool($0.showsVerticalScrollIndicator) }
+    case "collectionview.selfsizinginvalidation":
+        return node.uiKit?.collectionView?.selfSizingInvalidation.map(LoupeMutationValue.string)
+    case "tableview.selfsizinginvalidation":
+        return node.uiKit?.tableView?.selfSizingInvalidation.map(LoupeMutationValue.string)
     default:
         return nil
     }
@@ -903,7 +1293,7 @@ private var unavailableOnTVControlMutationDescriptors: [LoupeMutationDescriptor]
 
 @MainActor
 private var scrollMutationDescriptors: [LoupeMutationDescriptor] {
-    commonScrollMutationDescriptors + unavailableOnTVScrollMutationDescriptors
+    commonScrollMutationDescriptors + listSizingMutationDescriptors + unavailableOnTVScrollMutationDescriptors
 }
 
 @MainActor
@@ -958,6 +1348,38 @@ private var commonScrollMutationDescriptors: [LoupeMutationDescriptor] {
                 throw unsupportedProperty("showsVerticalScrollIndicator", view: view)
             }
             scrollView.showsVerticalScrollIndicator = try boolValue(value)
+        }
+    ]
+}
+
+@MainActor
+private var listSizingMutationDescriptors: [LoupeMutationDescriptor] {
+    [
+        mutation(["collectionView.selfSizingInvalidation"]) { view, value in
+            guard let collectionView = view as? UICollectionView else {
+                throw unsupportedProperty("collectionView.selfSizingInvalidation", view: view)
+            }
+            if #available(iOS 16.0, tvOS 16.0, visionOS 1.0, *) {
+                collectionView.selfSizingInvalidation = try collectionViewSelfSizingInvalidation(try stringValue(value))
+            } else {
+                throw LoupeMutationError(
+                    code: "unsupported_property",
+                    message: "collectionView.selfSizingInvalidation requires iOS/tvOS 16 or newer."
+                )
+            }
+        },
+        mutation(["tableView.selfSizingInvalidation"]) { view, value in
+            guard let tableView = view as? UITableView else {
+                throw unsupportedProperty("tableView.selfSizingInvalidation", view: view)
+            }
+            if #available(iOS 16.0, tvOS 16.0, visionOS 1.0, *) {
+                tableView.selfSizingInvalidation = try tableViewSelfSizingInvalidation(try stringValue(value))
+            } else {
+                throw LoupeMutationError(
+                    code: "unsupported_property",
+                    message: "tableView.selfSizingInvalidation requires iOS/tvOS 16 or newer."
+                )
+            }
         }
     ]
 }
@@ -1324,6 +1746,47 @@ private func stackDistribution(_ rawValue: String) throws -> UIStackView.Distrib
     }
 }
 
+@available(iOS 16.0, tvOS 16.0, visionOS 1.0, *)
+private func collectionViewSelfSizingInvalidation(_ rawValue: String) throws -> UICollectionView.SelfSizingInvalidation {
+    switch normalizedEnumValue(rawValue) {
+    case "disabled":
+        return .disabled
+    case "enabled":
+        return .enabled
+    case "enabledincludingconstraints":
+        return .enabledIncludingConstraints
+    default:
+        throw LoupeMutationError(
+            code: "invalid_value",
+            message: "collectionView.selfSizingInvalidation must be disabled, enabled, or enabledIncludingConstraints."
+        )
+    }
+}
+
+@available(iOS 16.0, tvOS 16.0, visionOS 1.0, *)
+private func tableViewSelfSizingInvalidation(_ rawValue: String) throws -> UITableView.SelfSizingInvalidation {
+    switch normalizedEnumValue(rawValue) {
+    case "disabled":
+        return .disabled
+    case "enabled":
+        return .enabled
+    case "enabledincludingconstraints":
+        return .enabledIncludingConstraints
+    default:
+        throw LoupeMutationError(
+            code: "invalid_value",
+            message: "tableView.selfSizingInvalidation must be disabled, enabled, or enabledIncludingConstraints."
+        )
+    }
+}
+
+private func normalizedEnumValue(_ rawValue: String) -> String {
+    rawValue
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "-", with: "")
+        .replacingOccurrences(of: "_", with: "")
+        .lowercased()
+}
 
 private func mutationTypeName(of value: AnyObject) -> String {
     String(describing: type(of: value))

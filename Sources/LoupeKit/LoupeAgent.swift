@@ -1017,6 +1017,8 @@ private func uiKitProperties(for view: UIView) -> LoupeUIKitProperties {
         pageControl: pageControlProperties(for: view),
         progressView: progressViewProperties(for: view),
         activityIndicator: activityIndicatorProperties(for: view),
+        collectionView: collectionViewProperties(for: view),
+        tableView: tableViewProperties(for: view),
         imageView: imageViewProperties(for: view),
         pickerView: pickerViewProperties(for: view),
         tabBar: tabBarProperties(for: view),
@@ -1217,6 +1219,111 @@ private func scrollIndicatorInsets(for scrollView: UIScrollView) -> LoupeInsets 
         right: finiteDouble(horizontalInsets.right.doubleValue) ?? 0
     )
     #endif
+}
+
+@MainActor
+private func collectionViewProperties(for view: UIView) -> LoupeUICollectionViewProperties? {
+    guard let collectionView = view as? UICollectionView else {
+        return nil
+    }
+
+    let layout = collectionView.collectionViewLayout
+    let flowLayout = layout as? UICollectionViewFlowLayout
+    return LoupeUICollectionViewProperties(
+        selfSizingInvalidation: collectionViewSelfSizingInvalidationName(collectionView),
+        layoutClassName: typeName(of: layout),
+        delegateRespondsToSizeForItemAt: collectionViewDelegateRespondsToSizeForItemAt(collectionView),
+        flowLayout: flowLayout.map(collectionViewFlowLayoutProperties)
+    )
+}
+
+@MainActor
+private func collectionViewFlowLayoutProperties(_ layout: UICollectionViewFlowLayout) -> LoupeUICollectionFlowLayoutProperties {
+    LoupeUICollectionFlowLayoutProperties(
+        itemSize: loupeSize(from: layout.itemSize),
+        estimatedItemSize: loupeSize(from: layout.estimatedItemSize),
+        usesEstimatedItemSize: layout.estimatedItemSize != .zero,
+        usesAutomaticItemSize: layout.itemSize == UICollectionViewFlowLayout.automaticSize
+    )
+}
+
+@MainActor
+private func tableViewProperties(for view: UIView) -> LoupeUITableViewProperties? {
+    guard let tableView = view as? UITableView else {
+        return nil
+    }
+    return LoupeUITableViewProperties(
+        selfSizingInvalidation: tableViewSelfSizingInvalidationName(tableView),
+        rowHeight: finiteDouble(Double(tableView.rowHeight)) ?? 0,
+        estimatedRowHeight: finiteDouble(Double(tableView.estimatedRowHeight)) ?? 0,
+        usesAutomaticRowHeight: tableView.rowHeight == UITableView.automaticDimension,
+        usesEstimatedRowHeight: tableView.estimatedRowHeight > 0,
+        delegateRespondsToHeightForRowAt: tableViewDelegateResponds(tableView, selector: #selector(UITableViewDelegate.tableView(_:heightForRowAt:))),
+        delegateRespondsToEstimatedHeightForRowAt: tableViewDelegateResponds(tableView, selector: #selector(UITableViewDelegate.tableView(_:estimatedHeightForRowAt:)))
+    )
+}
+
+@MainActor
+func collectionViewSelfSizingInvalidationName(_ collectionView: UICollectionView) -> String? {
+    if #available(iOS 16.0, tvOS 16.0, visionOS 1.0, *) {
+        return collectionViewSelfSizingInvalidationName(collectionView.selfSizingInvalidation)
+    }
+    return nil
+}
+
+@available(iOS 16.0, tvOS 16.0, visionOS 1.0, *)
+private func collectionViewSelfSizingInvalidationName(_ value: UICollectionView.SelfSizingInvalidation) -> String {
+    switch value {
+    case .disabled:
+        return "disabled"
+    case .enabled:
+        return "enabled"
+    case .enabledIncludingConstraints:
+        return "enabledIncludingConstraints"
+    @unknown default:
+        return "unknown"
+    }
+}
+
+@MainActor
+func tableViewSelfSizingInvalidationName(_ tableView: UITableView) -> String? {
+    if #available(iOS 16.0, tvOS 16.0, visionOS 1.0, *) {
+        return tableViewSelfSizingInvalidationName(tableView.selfSizingInvalidation)
+    }
+    return nil
+}
+
+@available(iOS 16.0, tvOS 16.0, visionOS 1.0, *)
+private func tableViewSelfSizingInvalidationName(_ value: UITableView.SelfSizingInvalidation) -> String {
+    switch value {
+    case .disabled:
+        return "disabled"
+    case .enabled:
+        return "enabled"
+    case .enabledIncludingConstraints:
+        return "enabledIncludingConstraints"
+    @unknown default:
+        return "unknown"
+    }
+}
+
+@MainActor
+func collectionViewDelegateRespondsToSizeForItemAt(_ collectionView: UICollectionView) -> Bool {
+    collectionView.delegate?.responds(
+        to: #selector(UICollectionViewDelegateFlowLayout.collectionView(_:layout:sizeForItemAt:))
+    ) ?? false
+}
+
+@MainActor
+func tableViewDelegateResponds(_ tableView: UITableView, selector: Selector) -> Bool {
+    tableView.delegate?.responds(to: selector) ?? false
+}
+
+private func loupeSize(from size: CGSize) -> LoupeSize {
+    LoupeSize(
+        width: finiteDouble(Double(size.width)) ?? 0,
+        height: finiteDouble(Double(size.height)) ?? 0
+    )
 }
 
 private func loupeInsets(from insets: UIEdgeInsets) -> LoupeInsets {

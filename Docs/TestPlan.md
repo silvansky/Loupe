@@ -145,6 +145,12 @@ does not count as evidence that the CLI or skill improved agent performance.
   allowlisted UIKit property change. Property mutations animate by default, and
   `--no-animate` verifies the immediate path. Layout-owned values may be
   restored by UIKit and must be judged by the effective state.
+- Runtime collection/table self-sizing probe:
+  `loupe ui set --try-self-sizing` reports `selfSizingProbe` for cell-contained
+  mutations on iOS 16+. `Examples/LoupeExample/run-native-scenarios.sh` verifies
+  that fixed collection item sizes are skipped, estimated flow-layout
+  collection cells apply `enabledIncludingConstraints`, and repeated probes on
+  the same container return `already-enabled` without another invalidation.
 - Runtime mutation discovery:
   `loupe ui set --list` / `/mutations` exposes the active mutation property
   registry for agent planning.
@@ -215,5 +221,5 @@ does not count as evidence that the CLI or skill improved agent performance.
   through the accessibility tree. Loupe does not synthesize selectors from
   private SwiftUI view-tree implementation details.
 - Runtime mutation is strongest for text, color, visibility, layer styling, and
-  control values. Frame and constraint edits are diagnostic unless the effective
-  state confirms UIKit kept them.
+  control values. Frame, constraint, and list self-sizing edits are diagnostic
+  unless the effective state confirms UIKit kept them.

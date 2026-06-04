@@ -21,7 +21,8 @@ import Testing
             selector: LoupeMutationSelector(kind: .testID, value: "example.card"),
             property: "frame",
             value: .rect(LoupeRect(x: 20, y: 120, width: 220, height: 80)),
-            animation: LoupeMutationAnimation(duration: 0.4, delay: 0.1, curve: "linear")
+            animation: LoupeMutationAnimation(duration: 0.4, delay: 0.1, curve: "linear"),
+            trySelfSizing: true
         )
 
         let data = try JSONEncoder().encode(request)
@@ -30,6 +31,24 @@ import Testing
         #expect(decoded.animation?.duration == 0.4)
         #expect(decoded.animation?.delay == 0.1)
         #expect(decoded.animation?.curve == "linear")
+        #expect(decoded.trySelfSizing)
+    }
+
+    @Test func mutationRequestDefaultsMissingTrySelfSizingToFalse() throws {
+        let data = Data(
+            """
+            {
+              "selector": { "kind": "testID", "value": "example.card", "exact": true },
+              "property": "alpha",
+              "value": { "type": "double", "value": 0.5 },
+              "layout": true
+            }
+            """.utf8
+        )
+
+        let decoded = try JSONDecoder().decode(LoupeMutationRequest.self, from: data)
+
+        #expect(decoded.trySelfSizing == false)
     }
 
     @Test func mutationReflectionKeepsHierarchyContextAndSourceCandidates() throws {
@@ -72,6 +91,19 @@ import Testing
             before: before,
             after: after,
             hierarchy: LoupeMutationHierarchyContext(target: LoupeMutationNodeSummary(ref: "n3", typeName: "UILabel")),
+            selfSizingProbe: LoupeSelfSizingProbeResult(
+                requested: true,
+                attempted: false,
+                applied: false,
+                reason: "delegate_size_for_item_owns_cell_size",
+                context: LoupeListSizingContext(
+                    containerRef: "n1",
+                    containerKind: "collectionView",
+                    containerTypeName: "UICollectionView",
+                    sizingOwner: "delegateSizeForItem",
+                    canAttemptSelfSizing: false
+                )
+            ),
             snapshotID: "snapshot-2"
         )
 
@@ -82,6 +114,8 @@ import Testing
         #expect(decoded.before.text == "Before")
         #expect(decoded.after.text == "After")
         #expect(decoded.hierarchy?.target.typeName == "UILabel")
+        #expect(decoded.selfSizingProbe?.reason == "delegate_size_for_item_owns_cell_size")
+        #expect(decoded.selfSizingProbe?.context?.sizingOwner == "delegateSizeForItem")
     }
 
     @Test func constraintMutationResponseRoundTripsEffectiveState() throws {

@@ -126,6 +126,9 @@ TRACE_SUMMARY_PATH="/tmp/loupe-native-trace-summary.txt"
 FRAME_MUTATION_PATH="/tmp/loupe-native-frame-mutation.json"
 LAYOUT_MUTATION_PATH="/tmp/loupe-native-layout-mutation.json"
 STACK_MUTATION_PATH="/tmp/loupe-native-stack-mutation.json"
+SELF_SIZING_SKIP_PATH="/tmp/loupe-native-self-sizing-skip.json"
+SELF_SIZING_MUTATION_PATH="/tmp/loupe-native-self-sizing-mutation.json"
+SELF_SIZING_ALREADY_PATH="/tmp/loupe-native-self-sizing-already.json"
 CONSTRAINTS_PATH="/tmp/loupe-native-constraints.json"
 CONSTRAINT_MUTATION_PATH="/tmp/loupe-native-constraint-mutation.json"
 CONSTRAINT_DEACTIVATE_PATH="/tmp/loupe-native-constraint-deactivate.json"
@@ -333,7 +336,15 @@ grep -q '"selectedItem" : "Home"' "$INSPECT_PATH"
 
 .build/debug/loupe ui node "$SNAPSHOT_PATH" --test-id example.components.collectionView > "$INSPECT_PATH"
 grep -q '"className" : "UICollectionView"' "$INSPECT_PATH"
+grep -q '"collectionView"' "$INSPECT_PATH"
+grep -q '"usesEstimatedItemSize" : false' "$INSPECT_PATH"
 assert_query example.components.collection.0 /tmp/loupe-native-collection-cell-query.json
+
+.build/debug/loupe ui node "$SNAPSHOT_PATH" --test-id example.components.selfSizingCollectionView > "$INSPECT_PATH"
+grep -q '"className" : "UICollectionView"' "$INSPECT_PATH"
+grep -q '"collectionView"' "$INSPECT_PATH"
+grep -q '"usesEstimatedItemSize" : true' "$INSPECT_PATH"
+assert_query example.components.selfSizingCollection.0 /tmp/loupe-native-self-sizing-collection-cell-query.json
 
 .build/debug/loupe ui node "$SNAPSHOT_PATH" --test-id example.components.pickerView > "$INSPECT_PATH"
 grep -q '"className" : "UIPickerView"' "$INSPECT_PATH"
@@ -390,6 +401,41 @@ grep -q '"value" : "vertical"' "$STACK_MUTATION_PATH"
 fetch_snapshot
 .build/debug/loupe ui node "$SNAPSHOT_PATH" --test-id example.components.switchRow > "$INSPECT_PATH"
 grep -q '"axis" : "vertical"' "$INSPECT_PATH"
+
+echo "case: collection self-sizing probe only runs for supported sizing contexts"
+.build/debug/loupe ui set --host "$HOST" --test-id example.components.collection.0.label layout.hugging.horizontal 260 --try-self-sizing --no-animate --output "$SELF_SIZING_SKIP_PATH"
+ruby -rjson -e '
+  result = JSON.parse(File.read(ARGV.fetch(0)))
+  probe = result.fetch("selfSizingProbe")
+  abort("fixed collection unexpectedly attempted self sizing") unless probe.fetch("attempted") == false
+  abort("fixed collection unexpectedly applied self sizing") unless probe.fetch("applied") == false
+  abort("unexpected fixed collection reason") unless probe.fetch("reason") == "flow_layout_item_size_is_fixed"
+  context = probe.fetch("context")
+  abort("unexpected fixed collection context") unless context.fetch("containerTestID") == "example.components.collectionView"
+' "$SELF_SIZING_SKIP_PATH"
+
+.build/debug/loupe ui set --host "$HOST" --test-id example.components.selfSizingCollection.0.label layout.hugging.horizontal 260 --try-self-sizing --no-animate --output "$SELF_SIZING_MUTATION_PATH"
+ruby -rjson -e '
+  result = JSON.parse(File.read(ARGV.fetch(0)))
+  probe = result.fetch("selfSizingProbe")
+  abort("self-sizing collection did not attempt") unless probe.fetch("attempted") == true
+  abort("self-sizing collection did not apply") unless probe.fetch("applied") == true
+  abort("self-sizing mode not enabled") unless probe.fetch("effectiveMode") == "enabledIncludingConstraints"
+  context = probe.fetch("context")
+  abort("unexpected self-sizing container") unless context.fetch("containerTestID") == "example.components.selfSizingCollectionView"
+  abort("unexpected self-sizing owner") unless context.fetch("sizingOwner") == "estimatedFlowLayoutSelfSizing"
+' "$SELF_SIZING_MUTATION_PATH"
+
+.build/debug/loupe ui set --host "$HOST" --test-id example.components.selfSizingCollection.0.label layout.hugging.vertical 252 --try-self-sizing --no-animate --output "$SELF_SIZING_ALREADY_PATH"
+ruby -rjson -e '
+  result = JSON.parse(File.read(ARGV.fetch(0)))
+  probe = result.fetch("selfSizingProbe")
+  abort("already-enabled self sizing should not attempt again") unless probe.fetch("attempted") == false
+  abort("already-enabled self sizing should stay applied") unless probe.fetch("applied") == true
+  abort("unexpected already-enabled reason") unless probe.fetch("reason") == "already_enabledIncludingConstraints"
+  warning = result.fetch("warning", "")
+  abort("already-enabled result should not emit self-sizing warning") if warning.include?("trySelfSizing")
+' "$SELF_SIZING_ALREADY_PATH"
 
 echo "case: Auto Layout constraint listing and mutation"
 .build/debug/loupe ui constraints --host "$HOST" --test-id example.design.card --json --output "$CONSTRAINTS_PATH"
@@ -488,6 +534,9 @@ echo "subtree: $SUBTREE_PATH"
 echo "frame mutation: $FRAME_MUTATION_PATH"
 echo "layout mutation: $LAYOUT_MUTATION_PATH"
 echo "stack mutation: $STACK_MUTATION_PATH"
+echo "self-sizing skip: $SELF_SIZING_SKIP_PATH"
+echo "self-sizing mutation: $SELF_SIZING_MUTATION_PATH"
+echo "self-sizing already: $SELF_SIZING_ALREADY_PATH"
 echo "constraints: $CONSTRAINTS_PATH"
 echo "constraint mutation: $CONSTRAINT_MUTATION_PATH"
 echo "constraint deactivate: $CONSTRAINT_DEACTIVATE_PATH"
