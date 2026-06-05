@@ -116,9 +116,24 @@ public struct LoupeAccessibilityTree: Codable, Equatable {
 
     public static func build(
         from snapshot: LoupeSnapshot,
-        includeHidden: Bool = false
+        includeHidden: Bool = false,
+        visibilityMode: LoupeQueryVisibilityMode = .occlusion
     ) -> LoupeAccessibilityTree {
-        let sourceNodes = snapshot.nodes.values.filter { shouldInclude($0, includeHidden: includeHidden) }
+        let surfaceVisibleRefs = !includeHidden && visibilityMode != .raw
+            ? LoupeSurfaceVisibility.visibleNodeRefs(
+                in: snapshot,
+                includesOffscreen: visibilityMode == .occlusion
+            )
+            : nil
+        let sourceNodes = snapshot.nodes.values.filter {
+            shouldInclude(
+                $0,
+                includeHidden: includeHidden,
+                visibilityMode: visibilityMode,
+                surfaceVisibleRefs: surfaceVisibleRefs,
+                snapshot: snapshot
+            )
+        }
         let includedSourceRefs = Set(sourceNodes.map(\.ref))
         var nodes: [String: LoupeAccessibilityNode] = [:]
         var childrenByParent: [String: [String]] = [:]
@@ -145,7 +160,7 @@ public struct LoupeAccessibilityTree: Codable, Equatable {
                 traits: accessibility?.traits ?? [],
                 frame: frame,
                 activationPoint: validActivationPoint(accessibility?.activationPoint, frame: frame),
-                isVisible: source.isVisible,
+                isVisible: isVisible(source, in: snapshot, visibilityMode: visibilityMode, surfaceVisibleRefs: surfaceVisibleRefs),
                 isEnabled: source.isEnabled,
                 isInteractive: source.isInteractive || (accessibility?.traits.contains("button") ?? false),
                 isFocused: source.uiKit?.isFocused,
@@ -182,8 +197,14 @@ public struct LoupeAccessibilityTree: Codable, Equatable {
         )
     }
 
-    private static func shouldInclude(_ node: LoupeNode, includeHidden: Bool) -> Bool {
-        if !includeHidden, !node.isVisible {
+    private static func shouldInclude(
+        _ node: LoupeNode,
+        includeHidden: Bool,
+        visibilityMode: LoupeQueryVisibilityMode,
+        surfaceVisibleRefs: Set<String>?,
+        snapshot: LoupeSnapshot
+    ) -> Bool {
+        if !includeHidden, !isVisible(node, in: snapshot, visibilityMode: visibilityMode, surfaceVisibleRefs: surfaceVisibleRefs) {
             return false
         }
 
@@ -206,6 +227,31 @@ public struct LoupeAccessibilityTree: Codable, Equatable {
             return true
         }
         return accessibility?.traits.isEmpty == false
+    }
+
+    private static func isVisible(
+        _ node: LoupeNode,
+        in snapshot: LoupeSnapshot,
+        visibilityMode: LoupeQueryVisibilityMode,
+        surfaceVisibleRefs: Set<String>?
+    ) -> Bool {
+        switch visibilityMode {
+        case .surface:
+            return LoupeSurfaceVisibility.isSurfaceVisible(
+                node,
+                in: snapshot,
+                visibleRefs: surfaceVisibleRefs
+            )
+        case .occlusion:
+            return LoupeSurfaceVisibility.isSurfaceVisible(
+                node,
+                in: snapshot,
+                visibleRefs: surfaceVisibleRefs,
+                includesOffscreen: true
+            )
+        case .raw:
+            return node.isVisible
+        }
     }
 
     private static func nearestAccessibilityParentRef(

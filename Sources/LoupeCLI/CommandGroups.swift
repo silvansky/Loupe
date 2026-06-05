@@ -86,7 +86,7 @@ extension LoupeCLI {
                 try await runtimeFetch(
                     rest,
                     path: "/accessibility",
-                    usage: "loupe ui accessibility [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]"
+                    usage: "loupe ui accessibility [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--include-hidden] [--output <path>]"
                 )
             }
         case "screenshot":
@@ -145,7 +145,7 @@ extension LoupeCLI {
 
     static func wait(_ arguments: [String]) async throws {
         guard let mode = arguments.first else {
-            throw CLIError("Usage: loupe act wait visible|gone|value <selector> [--timeout <seconds>]")
+            throw CLIError("Usage: loupe act wait visible|gone|value (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--timeout <seconds>]")
         }
         let rest = Array(arguments.dropFirst())
         switch mode {

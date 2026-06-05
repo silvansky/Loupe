@@ -196,4 +196,10 @@ struct RuntimeActionModelsTests {
         #expect(decoded.resolvedSource == "remotePress:select")
         #expect(decoded.resolvedScreen == LoupeSize(width: 1920, height: 1080))
     }
+
+    @Test func actionTraceTextRedactsTypedInput() {
+        #expect(ActionTraceText.recordable(command: "type", text: "hunter2") == "<redacted>")
+        #expect(ActionTraceText.recordable(command: "type", text: nil) == nil)
+        #expect(ActionTraceText.recordable(command: "swipe", text: "metadata") == "metadata")
+    }
 }

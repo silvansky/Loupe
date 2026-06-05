@@ -5,6 +5,31 @@ public enum LoupeNodeKind: String, Codable, Equatable {
     case scene
     case window
     case view
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        switch rawValue {
+        case "application":
+            self = .application
+        case "scene":
+            self = .scene
+        case "window":
+            self = .window
+        case "view", "tabBarItem":
+            self = .view
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Cannot initialize LoupeNodeKind from invalid String value \(rawValue)"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public struct LoupeStyle: Codable, Equatable {
@@ -125,10 +150,12 @@ public struct LoupeUIButtonProperties: Codable, Equatable {
 public struct LoupeUITextFieldProperties: Codable, Equatable {
     public var textAlignment: String?
     public var borderStyle: String?
+    public var isSecureTextEntry: Bool?
 
-    public init(textAlignment: String? = nil, borderStyle: String? = nil) {
+    public init(textAlignment: String? = nil, borderStyle: String? = nil, isSecureTextEntry: Bool? = nil) {
         self.textAlignment = textAlignment
         self.borderStyle = borderStyle
+        self.isSecureTextEntry = isSecureTextEntry
     }
 }
 
@@ -678,6 +705,31 @@ public struct LoupeNode: Codable, Equatable {
     public var custom: [String: LoupeMetadataValue]
     public var children: [String]
 
+    private enum CodingKeys: String, CodingKey {
+        case ref
+        case parentRef
+        case kind
+        case typeName
+        case role
+        case testID
+        case label
+        case value
+        case placeholder
+        case text
+        case renderedText
+        case semanticText
+        case frame
+        case isVisible
+        case isEnabled
+        case isInteractive
+        case style
+        case accessibility
+        case runtime
+        case uiKit
+        case custom
+        case children
+    }
+
     public init(
         ref: String,
         parentRef: String?,
@@ -724,6 +776,33 @@ public struct LoupeNode: Codable, Equatable {
         self.uiKit = uiKit
         self.custom = custom
         self.children = children
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        ref = try container.decode(String.self, forKey: .ref)
+        parentRef = try container.decodeIfPresent(String.self, forKey: .parentRef)
+        kind = try container.decode(LoupeNodeKind.self, forKey: .kind)
+        typeName = try container.decode(String.self, forKey: .typeName)
+        role = try container.decodeIfPresent(String.self, forKey: .role)
+        testID = try container.decodeIfPresent(String.self, forKey: .testID)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        value = try container.decodeIfPresent(String.self, forKey: .value)
+        placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        renderedText = try container.decodeIfPresent(String.self, forKey: .renderedText)
+        semanticText = try container.decodeIfPresent(String.self, forKey: .semanticText)
+        frame = try container.decodeIfPresent(LoupeRect.self, forKey: .frame)
+        isVisible = try container.decode(Bool.self, forKey: .isVisible)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        isInteractive = try container.decode(Bool.self, forKey: .isInteractive)
+        style = try container.decodeIfPresent(LoupeStyle.self, forKey: .style)
+        accessibility = try container.decodeIfPresent(LoupeAccessibility.self, forKey: .accessibility)
+        runtime = try container.decodeIfPresent(LoupeNodeRuntimeProperties.self, forKey: .runtime)
+        uiKit = try container.decodeIfPresent(LoupeUIKitProperties.self, forKey: .uiKit)
+        custom = try container.decodeIfPresent([String: LoupeMetadataValue].self, forKey: .custom) ?? [:]
+        children = try container.decodeIfPresent([String].self, forKey: .children) ?? []
     }
 }
 

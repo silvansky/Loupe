@@ -1,88 +1,66 @@
 # Evidence Workflow
 
-## Observe
+Use this when deciding what Loupe evidence proves and what to capture next.
+
+## Capture
 
 ```bash
-REPORT=/tmp/loupe-checkout-report
-rm -rf "$REPORT"
-loupe ui report --bundle-id com.example.App --output "$REPORT"
-loupe ui compact "$REPORT/snapshot.json"
-loupe ui screen "$REPORT/snapshot.json" --limit 80
-loupe ui tree "$REPORT/snapshot.json" --accessibility --depth 3
-loupe ui tree "$REPORT/snapshot.json" --view --depth 3
-loupe ui node "$REPORT/snapshot.json" --test-id target.id
+$LOUPE ui report --host <host> --output /tmp/loupe-report
+$LOUPE ui query /tmp/loupe-report/snapshot.json --test-id target.id
+$LOUPE ui node /tmp/loupe-report/snapshot.json --ref n21
 ```
 
-`ui report` stores screenshot, snapshot, screen-map, accessibility, compact,
-audit, runtime, and summary files. Logs are in `runtime.json.logs`; newer CLI
-builds may also emit `logs.json`.
+Saved snapshots are positional arguments for read-only `ui` commands; reserve
+`--snapshot` for ref-based actions and mutations. `ui report` writes JSON plus
+screenshots when supported; macOS host runtimes may need JSON-only proof.
 
-Start broad, then query only the target:
+## Visibility And Targeting
 
-```bash
-loupe ui query "$REPORT/snapshot.json" --test-id target.id
-loupe ui node "$REPORT/snapshot.json" --test-id target.id --node-only
-loupe ui subtree "$REPORT/snapshot.json" --test-id target.container --depth 2
-```
+- Prefer `testID` when available. Use text/role for discovery, then switch to
+  stable `testID` or current-snapshot `ref`.
+- Raw `isVisible` can include dismissed sheets or reused offscreen cells. For
+  current-screen claims, use default `ui query`, `compact`, `screen`, `audit`,
+  hit-test evidence, screenshots, or a fresh report.
+- `ui hit-test` and `ui responder-chain` are live-runtime evidence; pass
+  `--host`, `--udid`, or `--bundle-id`, not a saved snapshot path.
+- If overlays, alerts, menus, sheets, or keyboards may cover a target, hit-test
+  before acting and recapture after acting.
+- If screenshot-visible controls are missing from default query, inspect with
+  `--include-hidden`, hit-test/focus the point, then prove state with trace plus
+  fresh report/screen/node evidence.
 
-Prefer `--test-id` when available. Use `--ref` only within the same snapshot.
-Use text or role flags for discovery, then switch to `testID` or `ref`.
+## SwiftUI And Bridges
 
-## SwiftUI And Bridge Evidence
+- Screenshot-visible text, buttons, metadata, or rows may be absent from both
+  view and accessibility text queries. Treat that as a semantic boundary, not a
+  blank app.
+- Claim queryability only when `ui query`, `ui screen`, a stable accessibility
+  ID, or a probe proves it.
+- Use bridge controls, hit-tests, coordinate traces, screenshots, app-authored
+  probes, logs, or defaults to prove workflows.
+- Treat `ui audit` on SwiftUI-hosted internals as triage. Empty
+  `ui reflect sourceCandidates` can be correct for framework wrappers or
+  synthetic probes.
 
-For SwiftUI, prefer stable accessibility surfaces over private hierarchy
-assumptions. If the app imports `LoupeKit`, ask for the public
-`.loupeProbe(...)` modifier on complex regions that need durable `ui node`
-targets with captured bounds. If the app should not depend on `LoupeKit`, ask
-for an equivalent zero-dependency `UIViewRepresentable` or
-`NSViewRepresentable` helper with a local name such as `.localLoupeProbe(...)`;
-it should be attached with `background` and set standard accessibility
-identifiers and labels only.
+## App-Authored Probes
 
-On watchOS, there is no UIKit/AppKit view-tree walker. A no-import local
-SwiftUI helper should measure bounds with `GeometryReader` and post
-`dev.loupe.probe` / `dev.loupe.removeProbe`; injected Loupe registers those
-probes into the same runtime backend used by public `Loupe.registerProbe(...)`.
+- Import path: public `.loupeProbe(...)` from `LoupeKit`.
+- No-import path: local `UIViewRepresentable`/`NSViewRepresentable` fallback
+  with accessibility identifier/label/traits.
+- Notification path: post `dev.loupe.probe` / `dev.loupe.removeProbe` with
+  measured bounds. Synthetic nodes are structural locators, not platform views,
+  so activation and mutation can correctly fail.
+- Probe payload keys: `id`, `label`, `role`, `frame` with `x/y/width/height`,
+  and optional `isInteractive`.
 
-For app diagnostics, use `Loupe.log("checkout_visible")` when importing
-`LoupeKit`. Without that import, post the bridge notification and read logs:
+## Diagnostics
 
-```swift
-NotificationCenter.default.post(
-    name: Notification.Name("dev.loupe.log"),
-    object: nil,
-    userInfo: ["message": "checkout_visible"]
-)
-```
+For no-import runtime logs, post `dev.loupe.log` with `["message": "..."]`,
+then collect with `debug logs --host <host> --output <logs.json>`.
 
-```bash
-loupe debug logs --bundle-id com.example.App --output "$REPORT/logs.json"
-```
+`debug network` collects app-authored `dev.loupe.network` events and LoupeKit
+fixture URLProtocol events; it is not a general packet sniffer.
 
-Use `Notification.Name("dev.loupe.viewMetadata")` for scalar metadata on a
-UIKit view or stable `testID`, then verify with `loupe ui node`.
-
-## References And Object Diagnostics
-
-Use `Loupe.recordReference(...)` or the `dev.loupe.reference` notification when
-the task needs ownership evidence, then answer owner questions with:
-
-```bash
-loupe debug object-graph DeviceActuationService --host <runtime-host> --output /tmp/loupe-reference-graph.json
-```
-
-The graph is app-authored reference evidence, not private heap traversal. Use
-`owners` to answer what points at a target, and cite `evidenceID`, `kind`,
-`label`, `metadata`, and `timestamp`.
-
-For runtime object diagnostics:
-
-```bash
-loupe debug objects classes --matching DeviceActuationService --host <runtime-host> --output /tmp/loupe-object-classes.json
-loupe debug objects describe DeviceActuationService --host <runtime-host> --output /tmp/loupe-object-description.json
-loupe debug leaks --alive-only --host <runtime-host> --output /tmp/loupe-leaks.json
-```
-
-`debug objects` reads Objective-C runtime class metadata. `debug leaks` reads
-weak lifetime probes registered by the app with `Loupe.watchLifetime(...)`; it
-is not full private heap traversal.
+Use `debug refs`, `object-graph`, `leaks`, `keychain`, `defaults`, or `flags`
+only when the app or task contract names that evidence/key. These are
+app-scoped diagnostics; empty output can be a valid bounded result.

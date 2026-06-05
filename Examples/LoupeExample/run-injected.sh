@@ -105,7 +105,7 @@ curl -sS "$HOST/snapshot" > "$SNAPSHOT_PATH"
 curl -sS "$HOST/snapshot" > "$DARK_SNAPSHOT_PATH"
 .build/debug/loupe ui audit "$DARK_SNAPSHOT_PATH" --kind lowTextContrast > "$AUDIT_PATH"
 .build/debug/loupe ui appearance system --host "$HOST" >/dev/null
-.build/debug/loupe debug scroll --host "$HOST" --udid "$DEVICE" --from 201,740 --to 201,320 --trace-dir "$PERF_TRACE" --output "$PERF_PATH" >/dev/null
+.build/debug/loupe debug scroll --host "$HOST" --udid "$DEVICE" --test-id example.customerList --delta 0,420 --output "$PERF_PATH" >/dev/null
 
 .build/debug/loupe ui query "$SNAPSHOT_PATH" --test-id example.customerList
 .build/debug/loupe ui node "$SNAPSHOT_PATH" --test-id example.customerList > "$INSPECT_PATH"
@@ -151,7 +151,7 @@ ruby -rjson -e '
   abort "expected env read appearance key" unless env_read.key?("appearance")
   perf = JSON.parse(File.read(ARGV.fetch(10)))
   abort "expected perf actionElapsed" unless perf["actionElapsed"].is_a?(Numeric) && perf["actionElapsed"] >= 0
-  abort "expected perf traceDirectory" unless perf["traceDirectory"] == ARGV.fetch(11)
+  abort "expected runtime scroll profile without traceDirectory" unless perf["traceDirectory"].nil?
   abort "expected perf before offset" unless perf["beforeOffset"].is_a?(Hash)
   abort "expected perf after offset" unless perf["afterOffset"].is_a?(Hash)
   abort "expected perf delta" unless perf["delta"].is_a?(Hash)

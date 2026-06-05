@@ -105,6 +105,17 @@ package struct LoupeCLIActionTrace: Codable, Equatable {
     }
 }
 
+package enum ActionTraceText {
+    package static let redactedInput = "<redacted>"
+
+    package static func recordable(command: String, text: String?) -> String? {
+        guard text != nil else {
+            return nil
+        }
+        return command == "type" ? redactedInput : text
+    }
+}
+
 package struct LoupeCLIActionErrorTrace: Codable, Equatable {
     package var message: String
     package var recordedAt: Date

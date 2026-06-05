@@ -154,6 +154,31 @@ struct RuntimeTests {
         #expect(scrollView.showsHorizontalScrollIndicator == true)
     }
 
+    @Test func nodeKindDecodesLegacySyntheticTabBarItemSnapshotsAsViews() throws {
+        let data = Data(
+            """
+            {
+              "ref": "n403",
+              "kind": "tabBarItem",
+              "typeName": "UITabBarItem",
+              "role": "button",
+              "text": "Settings",
+              "isVisible": true,
+              "isEnabled": true,
+              "isInteractive": true
+            }
+            """.utf8
+        )
+
+        let node = try JSONDecoder().decode(LoupeNode.self, from: data)
+
+        #expect(node.kind == .view)
+        #expect(node.typeName == "UITabBarItem")
+        #expect(node.role == "button")
+        #expect(node.custom.isEmpty)
+        #expect(node.children.isEmpty)
+    }
+
     @Test func snapshotNodeCanCarryLayoutAndStackViewProperties() {
         let node = LoupeNode(
             ref: "stack",

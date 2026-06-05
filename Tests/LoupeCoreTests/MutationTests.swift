@@ -22,7 +22,8 @@ import Testing
             property: "frame",
             value: .rect(LoupeRect(x: 20, y: 120, width: 220, height: 80)),
             animation: LoupeMutationAnimation(duration: 0.4, delay: 0.1, curve: "linear"),
-            trySelfSizing: true
+            trySelfSizing: true,
+            includeHidden: true
         )
 
         let data = try JSONEncoder().encode(request)
@@ -32,9 +33,10 @@ import Testing
         #expect(decoded.animation?.delay == 0.1)
         #expect(decoded.animation?.curve == "linear")
         #expect(decoded.trySelfSizing)
+        #expect(decoded.includeHidden)
     }
 
-    @Test func mutationRequestDefaultsMissingTrySelfSizingToFalse() throws {
+    @Test func mutationRequestDefaultsMissingOptionalBooleansToFalse() throws {
         let data = Data(
             """
             {
@@ -49,6 +51,7 @@ import Testing
         let decoded = try JSONDecoder().decode(LoupeMutationRequest.self, from: data)
 
         #expect(decoded.trySelfSizing == false)
+        #expect(decoded.includeHidden == false)
     }
 
     @Test func mutationReflectionKeepsHierarchyContextAndSourceCandidates() throws {

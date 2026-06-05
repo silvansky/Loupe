@@ -63,7 +63,11 @@ extension LoupeCLI {
         case "debug":
             return debugUsage
         case "app launch":
-            return "Usage: loupe app launch --bundle-id <id> [--device <sim|device>] [--inject|--linked] [--host <url>] [--port <port>] [--bind-host <ip>] [--env KEY=VALUE] [--timeout <seconds>]"
+            return """
+            Usage: loupe app launch --bundle-id <id> [--device <sim|device|udid>] [--inject|--linked] [--host <url>] [--port <port>] [--bind-host <ip>] [--env KEY=VALUE] [--timeout <seconds>]
+
+            For working-tree injector validation, set LOUPE_INJECTOR_PATH explicitly; otherwise injector resolution may use an installed Homebrew injector. Run `loupe injector-path` to inspect the resolved injector.
+            """
         case "app list":
             return "Usage: loupe app list [--json] [--timeout <seconds>]"
         case "app use":
@@ -92,13 +96,13 @@ extension LoupeCLI {
         case "ui screen", "ui screen-map":
             return "Usage: loupe ui screen [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--include-hidden] [--include-containers] [--limit <n>]"
         case "ui accessibility":
-            return "Usage: loupe ui accessibility [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]"
+            return "Usage: loupe ui accessibility [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--include-hidden] [--output <path>]"
         case "ui screenshot":
             return "Usage: loupe ui screenshot --udid <sim> --output <path> [--timeout <seconds>]"
         case "ui node":
             return "Usage: loupe ui node <snapshot.json> (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--include-hidden] [--fields node,parent,children,siblings]"
         case "ui query":
-            return "Usage: loupe ui query [snapshot.json] (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--host <url>] [--bundle-id <id>] [--tree view|accessibility]"
+            return QueryOptions.usage
         case "ui subtree":
             return "Usage: loupe ui subtree <snapshot.json> (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--depth <n>] [--include-hidden]"
         case "ui paint", "ui paint-stack":
@@ -128,17 +132,20 @@ extension LoupeCLI {
         case "ui compare-design":
             return "Usage: loupe ui compare-design <snapshot.json> <design.json> [--json] [--limit <n>]"
         case "act tap":
-            return "Usage: loupe act tap (--test-id <id> | --ref <ref> | --x <n> --y <n>) --udid <sim> [--host <url>] [--snapshot <snapshot.json>] [--trace-dir <path>] [--expect-visible <testID>]"
+            return "Usage: loupe act tap (--test-id <id> | --ref <view-or-ax-ref> | --x <n> --y <n>) [--udid <sim>] [--host <url>] [--backend native|runtime|auto] [--snapshot <snapshot.json>] [--trace-dir <path>] [--expect-visible <testID>] [--timeout <seconds>]"
         case "act swipe":
-            return "Usage: loupe act swipe --from x,y --to x,y --udid <sim> [--host <url>] [--duration <seconds>] [--no-verify-scroll] [--trace-dir <path>]"
+            return "Usage: loupe act swipe --from x,y --to x,y [--udid <sim>] [--host <url>] [--duration <seconds>] [--no-verify-scroll] [--trace-dir <path>] [--timeout <seconds>]"
         case "act drag":
-            return "Usage: loupe act drag --from x,y --to x,y --udid <sim> [--host <url>] [--duration <seconds>] [--trace-dir <path>]"
+            return "Usage: loupe act drag --from x,y --to x,y [--udid <sim>] [--host <url>] [--duration <seconds>] [--trace-dir <path>] [--timeout <seconds>]"
         case "act type":
-            return "Usage: loupe act type <text> --udid <sim> [--host <url>] [--trace-dir <path>]"
+            return "Usage: loupe act type <text> [--udid <sim>] [--host <url>] [--trace-dir <path>] [--timeout <seconds>]"
         case "act press":
-            return "Usage: loupe act press up|down|left|right|select|menu|playPause --udid <sim> [--host <url>] [--trace-dir <path>] [--expect-visible <testID>]"
+            return "Usage: loupe act press up|down|left|right|select|menu|playPause [--udid <sim>] [--host <url>] [--trace-dir <path>] [--expect-visible <testID>] [--timeout <seconds>]"
         case "act wait":
-            return "Usage: loupe act wait visible|gone|value <selector> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--timeout <seconds>]"
+            return """
+            Usage: loupe act wait visible|gone (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--host <url>] [--udid <sim>] [--bundle-id <id>] [--timeout <seconds>] [--output <path>]
+                   loupe act wait value (--test-id <id> | --ref <ref> | --text <text> | --role <role>) --key <path> --equals <value> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--timeout <seconds>] [--interval <seconds>] [--output <path>]
+            """
         case "debug logs":
             return "Usage: loupe debug logs [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]"
         case "debug network":

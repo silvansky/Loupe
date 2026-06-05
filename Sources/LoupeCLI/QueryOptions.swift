@@ -16,7 +16,7 @@ struct QueryOptions {
 
     init(_ arguments: [String]) throws {
         if arguments.isEmpty {
-            throw CLIError("Usage: loupe ui query [snapshot.json] (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--host <url>] [--bundle-id <id>] [--tree view|accessibility]")
+            throw CLIError(Self.usage)
         }
 
         snapshotURL = nil
@@ -91,6 +91,8 @@ struct QueryOptions {
             throw CLIError("--timeout must be greater than 0")
         }
     }
+
+    static let usage = "Usage: loupe ui query [snapshot.json] (--test-id <id> | --text <text> | --exact-text <text> | --role <role> | --ref <ref>) [--host <url>] [--udid <sim>] [--bundle-id <id>] [--tree view|accessibility] [--include-hidden] [--max-results <n>] [--timeout <seconds>]"
 
     private static func value(
         after option: String,

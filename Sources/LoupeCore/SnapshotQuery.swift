@@ -8,19 +8,28 @@ public enum LoupeSelector: Equatable {
     case ref(String)
 }
 
+public enum LoupeQueryVisibilityMode: Equatable {
+    case surface
+    case occlusion
+    case raw
+}
+
 public struct LoupeQueryOptions: Equatable {
     public var includeHidden: Bool
     public var includeDisabled: Bool
     public var maxResults: Int
+    public var visibilityMode: LoupeQueryVisibilityMode
 
     public init(
         includeHidden: Bool = false,
         includeDisabled: Bool = true,
-        maxResults: Int = 50
+        maxResults: Int = 50,
+        visibilityMode: LoupeQueryVisibilityMode = .surface
     ) {
         self.includeHidden = includeHidden
         self.includeDisabled = includeDisabled
         self.maxResults = maxResults
+        self.visibilityMode = visibilityMode
     }
 }
 
@@ -34,13 +43,13 @@ public struct LoupeQueryResult: Codable, Equatable {
     public var isEnabled: Bool
     public var isInteractive: Bool
 
-    public init(node: LoupeNode) {
+    public init(node: LoupeNode, isVisible: Bool? = nil) {
         ref = node.ref
         role = node.role
         text = LoupeObservationCompactor.displayText(for: node)
         testID = node.testID
         frame = node.frame
-        isVisible = node.isVisible
+        self.isVisible = isVisible ?? node.isVisible
         isEnabled = node.isEnabled
         isInteractive = node.isInteractive
     }
@@ -52,12 +61,23 @@ public enum LoupeSnapshotQuery {
         in snapshot: LoupeSnapshot,
         options: LoupeQueryOptions = LoupeQueryOptions()
     ) -> [LoupeQueryResult] {
-        snapshot.nodes.values
-            .filter { matchesVisibilityAndState($0, options: options) }
+        let surfaceVisibleRefs = shouldUseSurfaceVisibility(options)
+            ? LoupeSurfaceVisibility.visibleNodeRefs(
+                in: snapshot,
+                includesOffscreen: options.visibilityMode == .occlusion
+            )
+            : nil
+        return snapshot.nodes.values
+            .filter { matchesVisibilityAndState($0, options: options, surfaceVisibleRefs: surfaceVisibleRefs, snapshot: snapshot) }
             .filter { matches(selector, node: $0) }
             .sorted(by: resultOrder)
             .prefix(options.maxResults)
-            .map(LoupeQueryResult.init)
+            .map { node in
+                LoupeQueryResult(
+                    node: node,
+                    isVisible: surfaceVisibleRefs.map { $0.contains(node.ref) }
+                )
+            }
     }
 
     public static func first(
@@ -68,11 +88,43 @@ public enum LoupeSnapshotQuery {
         find(selector, in: snapshot, options: options).first
     }
 
+    package static func preferPlatformBackedMatches(
+        _ matches: [LoupeQueryResult],
+        in snapshot: LoupeSnapshot
+    ) -> [LoupeQueryResult] {
+        let grouped = Dictionary(grouping: matches, by: querySemanticKey)
+        let keysWithPlatformBackedAlternative = Set(grouped.compactMap { key, group -> String? in
+            let platformBacked = group.filter { !isSyntheticRegisteredProbeSource($0.ref, in: snapshot) }
+            let syntheticCount = group.count - platformBacked.count
+            if !platformBacked.isEmpty, syntheticCount > 0 {
+                return key
+            }
+            return nil
+        })
+
+        return matches.filter { match in
+            let key = querySemanticKey(match)
+            guard keysWithPlatformBackedAlternative.contains(key) else {
+                return true
+            }
+            return !isSyntheticRegisteredProbeSource(match.ref, in: snapshot)
+        }
+    }
+
+    package static func isSyntheticRegisteredProbeSource(_ sourceRef: String, in snapshot: LoupeSnapshot) -> Bool {
+        guard let node = snapshot.nodes[sourceRef] else {
+            return false
+        }
+        return isSyntheticRegisteredProbe(node)
+    }
+
     private static func matchesVisibilityAndState(
         _ node: LoupeNode,
-        options: LoupeQueryOptions
+        options: LoupeQueryOptions,
+        surfaceVisibleRefs: Set<String>?,
+        snapshot: LoupeSnapshot
     ) -> Bool {
-        if !options.includeHidden, !node.isVisible {
+        if !options.includeHidden, !isVisible(node, in: snapshot, options: options, surfaceVisibleRefs: surfaceVisibleRefs) {
             return false
         }
 
@@ -81,6 +133,35 @@ public enum LoupeSnapshotQuery {
         }
 
         return true
+    }
+
+    private static func shouldUseSurfaceVisibility(_ options: LoupeQueryOptions) -> Bool {
+        !options.includeHidden && options.visibilityMode != .raw
+    }
+
+    private static func isVisible(
+        _ node: LoupeNode,
+        in snapshot: LoupeSnapshot,
+        options: LoupeQueryOptions,
+        surfaceVisibleRefs: Set<String>?
+    ) -> Bool {
+        switch options.visibilityMode {
+        case .surface:
+            return LoupeSurfaceVisibility.isSurfaceVisible(
+                node,
+                in: snapshot,
+                visibleRefs: surfaceVisibleRefs
+            )
+        case .occlusion:
+            return LoupeSurfaceVisibility.isSurfaceVisible(
+                node,
+                in: snapshot,
+                visibleRefs: surfaceVisibleRefs,
+                includesOffscreen: true
+            )
+        case .raw:
+            return node.isVisible
+        }
     }
 
     private static func matches(_ selector: LoupeSelector, node: LoupeNode) -> Bool {
@@ -119,6 +200,16 @@ public enum LoupeSnapshotQuery {
             return lhs.isInteractive && !rhs.isInteractive
         }
 
+        if lhs.isVisible != rhs.isVisible {
+            return lhs.isVisible && !rhs.isVisible
+        }
+
+        let lhsSynthetic = isSyntheticRegisteredProbe(lhs)
+        let rhsSynthetic = isSyntheticRegisteredProbe(rhs)
+        if lhsSynthetic != rhsSynthetic {
+            return !lhsSynthetic && rhsSynthetic
+        }
+
         guard let lhsFrame = lhs.frame else { return false }
         guard let rhsFrame = rhs.frame else { return true }
 
@@ -127,6 +218,20 @@ public enum LoupeSnapshotQuery {
         }
 
         return lhsFrame.x < rhsFrame.x
+    }
+
+    package static func isSyntheticRegisteredProbe(_ node: LoupeNode) -> Bool {
+        node.typeName == "LoupeRegisteredProbe"
+            || node.custom["synthetic"] == .bool(true)
+            || node.custom["observationBackend"] == .string("registered-probes")
+    }
+
+    private static func querySemanticKey(_ match: LoupeQueryResult) -> String {
+        [
+            match.role ?? "",
+            match.testID ?? "",
+            match.text ?? "",
+        ].joined(separator: "|")
     }
 
     private static func stringMetadata(

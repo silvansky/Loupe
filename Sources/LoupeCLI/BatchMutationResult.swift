@@ -18,6 +18,7 @@ struct BatchMutationResult: Codable {
     var nextSnapshot: String
     var diff: String
     var targets: String
+    var responses: String?
     var traceDirectory: String
 }
 

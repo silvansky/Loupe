@@ -170,10 +170,13 @@ public final class LoupeAgent {
     public func activate(_ request: LoupeActivationRequest) throws -> LoupeActivationResponse {
         let beforeCapture = captureSnapshotWithViewRefs()
         let selector = loupeSelector(from: request.selector)
-        let matches = LoupeSnapshotQuery.find(
-            selector,
-            in: beforeCapture.snapshot,
-            options: LoupeQueryOptions(includeHidden: false, includeDisabled: false, maxResults: 8)
+        let matches = LoupeSnapshotQuery.preferPlatformBackedMatches(
+            LoupeSnapshotQuery.find(
+                selector,
+                in: beforeCapture.snapshot,
+                options: LoupeQueryOptions(includeHidden: false, includeDisabled: false, maxResults: 8)
+            ),
+            in: beforeCapture.snapshot
         )
 
         guard matches.count == 1, let target = matches.first else {
@@ -225,10 +228,19 @@ public final class LoupeAgent {
     public func mutate(_ request: LoupeMutationRequest) throws -> LoupeMutationResponse {
         let beforeCapture = captureSnapshotWithViewRefs()
         let selector = loupeSelector(from: request.selector)
-        let matches = LoupeSnapshotQuery.find(
-            selector,
-            in: beforeCapture.snapshot,
-            options: LoupeQueryOptions(includeHidden: true, includeDisabled: true, maxResults: 8)
+        let includeHidden = request.includeHidden || request.selector.kind == .ref
+        let matches = LoupeSnapshotQuery.preferPlatformBackedMatches(
+            LoupeSnapshotQuery.find(
+                selector,
+                in: beforeCapture.snapshot,
+                options: LoupeQueryOptions(
+                    includeHidden: includeHidden,
+                    includeDisabled: true,
+                    maxResults: 8,
+                    visibilityMode: .occlusion
+                )
+            ),
+            in: beforeCapture.snapshot
         )
 
         guard matches.count == 1, let target = matches.first else {
@@ -354,6 +366,16 @@ public final class LoupeAgent {
         let windowRefs = NSApp.windows.compactMap { window -> String? in
             captureWindow(window, parentRef: appRef, nodes: &nodes, viewRefs: &viewRefs, viewsByRef: &viewsByRef)
         }
+        let registeredProbeRefs = LoupeRuntime.shared.registeredProbes().map { probe in
+            let ref = makeRef()
+            nodes[ref] = loupeRegisteredProbeNode(
+                probe,
+                ref: ref,
+                parentRef: appRef,
+                runtimeMetadata: LoupeRuntime.shared.metadata(forTestID: probe.id)
+            )
+            return ref
+        }
 
         nodes[appRef] = LoupeNode(
             ref: appRef,
@@ -365,7 +387,7 @@ public final class LoupeAgent {
             isVisible: true,
             isEnabled: true,
             isInteractive: false,
-            children: windowRefs
+            children: windowRefs + registeredProbeRefs
         )
 
         return CapturedSnapshot(
@@ -983,6 +1005,7 @@ private func mutationHierarchyContext(targetRef: String, snapshot: LoupeSnapshot
     }
     let parentNode = target.parentRef.flatMap { snapshot.nodes[$0] }
     let parent = parentNode.map(mutationNodeSummary)
+    let ancestors = mutationAncestorSummaries(from: parentNode, snapshot: snapshot)
     let siblings = parentNode?.children
         .filter { $0 != targetRef }
         .compactMap { snapshot.nodes[$0].map(mutationNodeSummary) } ?? []
@@ -991,9 +1014,21 @@ private func mutationHierarchyContext(targetRef: String, snapshot: LoupeSnapshot
     return LoupeMutationHierarchyContext(
         target: mutationNodeSummary(target),
         parent: parent,
+        ancestors: ancestors.isEmpty ? nil : ancestors,
         siblings: siblings,
         children: children
     )
+}
+
+@MainActor
+private func mutationAncestorSummaries(from parent: LoupeNode?, snapshot: LoupeSnapshot) -> [LoupeMutationNodeSummary] {
+    var summaries: [LoupeMutationNodeSummary] = []
+    var current = parent?.parentRef.flatMap { snapshot.nodes[$0] }
+    while let node = current, summaries.count < 8 {
+        summaries.append(mutationNodeSummary(node))
+        current = node.parentRef.flatMap { snapshot.nodes[$0] }
+    }
+    return summaries
 }
 
 @MainActor

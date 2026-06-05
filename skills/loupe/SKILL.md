@@ -5,63 +5,65 @@ description: Use this skill when working with Loupe Apple-platform runtime autom
 
 # Loupe
 
-Use Loupe for Apple-platform runtime observation, diagnostics, CLI actions,
-mutation probes, and design QA.
+Use Loupe to observe, query, act on, mutate, and diagnose Apple-platform app
+runtimes through the in-process server.
 
 ## Core Rules
 
-- Use the installed `loupe`; resolve injector paths with `loupe injector-path`.
-- Loupe talks to the app's in-process Loupe server; no separate host daemon is
-  needed.
-- Keep full snapshots on disk during the task. Send compact output to agents by
-  default, then query or inspect specific refs on demand.
-- Keep attachment mode explicit:
-  - Simulator injection uses `--inject` and no app dependency.
-  - Physical-device debug runtimes link and embed the dynamic `LoupeInjector`
-    product. It depends on `LoupeKit` internally and starts Loupe automatically
-    when loaded.
-- Repository example apps should stay import-free when an injection path exists.
-  Do not add `import LoupeKit` to examples just to make a simulator workflow
-  pass.
-- Drive runtime E2E with Loupe CLI actions, not XCTest as the public harness.
-- Prefer `testID`, `ref`, or coordinates over tap-by-text.
+- Use grouped commands from current help: `app`, `ui`, `act`, and `debug`.
+  Old top-level verbs are compatibility aliases only.
+- Check subcommand help before adding flags; options are not shared globally.
+- For this repository's current runtime/CLI changes, use `./.build/debug/loupe`
+  plus a rebuilt local injector. Installed CLIs or injectors may be stale.
+- Keep the attachment mode explicit: simulator injection, linked physical
+  device runtime, macOS host runtime, watchOS, or visionOS.
+- Keep full reports, snapshots, and traces on disk; send compact observations
+  to agents, then query or inspect refs as needed.
+- Prefer accessibility for discovery/action intent; prefer the view tree for
+  layout, style, mutations, and visual diagnostics.
+- Prefer `testID`, current-snapshot `ref`, or coordinates. Do not use
+  tap-by-text as a public contract.
+- Command success alone is not proof. Verify with fresh reports, traces,
+  screenshots, hit-tests, logs, defaults, or effective state.
+- Repository examples should stay import-free when injection can cover the
+  workflow; do not add `import LoupeKit` just to make simulator examples pass.
 
-## Reference Files
+## References
 
-Read only the file needed for the current task:
+- `references/runtime-modes.md`: attaching, launching, platform boundaries.
+- `references/evidence-workflow.md`: reports, visibility, SwiftUI, probes,
+  logs, diagnostics.
+- `references/actions-and-mutations.md`: actions, waits, scrolls, mutations,
+  self-sizing, `reflect`.
 
-- `references/runtime-modes.md`: simulator injection, physical-device
-  `LoupeInjector` setup, runtime selection, and launch troubleshooting.
-- `references/evidence-workflow.md`: reports, snapshots, queries, diagnostics,
-  SwiftUI probes, bridge notifications, object graphs, and leaks.
-- `references/actions-and-mutations.md`: tap/swipe/drag/type/press, trace
-  verification, scroll profiling, mutations, and design QA checks.
+## Default Loop
 
-## Default Workflow
+1. Identify the runtime mode and host. Prefer the host printed by `app launch`;
+   `app current` can be stale.
+2. Capture `ui report` and keep `snapshot.json`.
+3. Discover with text/role/accessibility, then switch to `testID` or a ref from
+   the same snapshot. Inspect with `ui node` before acting.
+4. For overlays, alerts, reused cells, or stale refs, recapture and use
+   hit-test, responder-chain, screenshot, or trace proof.
+5. Act or mutate with a fresh output/trace path, then prove the result with a
+   fresh report, query, node, trace, or effective-state check.
 
-1. Identify the attachment mode: simulator injection, linked physical device, or
-   existing `--host`.
-2. Capture runtime evidence with `loupe ui report` or `loupe ui snapshot`.
-3. Use accessibility for discovery and action targets. Use the view tree for
-   layout, style, UIKit properties, mutation refs, and visual checks.
-4. Act through Loupe only when the platform supports it; preserve failed trace
-   paths until summarized or handed back.
-5. Verify with fresh snapshot/query/effective state, not command success alone.
+## Blind Validation Prompt
 
-## Quick Commands
+For a context-free agent, include only this skill, current help, and a compact
+contract:
 
-```bash
-loupe app launch --bundle-id com.example.App
-loupe app list
-loupe app use com.example.App
-loupe app current
+```text
+Run Loupe only through the provided executable and grouped command surface.
+Host setup/cleanup tools named in the contract are allowed.
+Provide: CLI path, help checked, app/build path, bundle id, device or UDID,
+attachment mode, host/port, injector path when used, source root, starting
+screen, scenario, expected evidence, allowed source edits.
 
-REPORT=/tmp/loupe-report
-rm -rf "$REPORT"
-loupe ui report --bundle-id com.example.App --output "$REPORT"
-loupe ui compact "$REPORT/snapshot.json"
-loupe ui query "$REPORT/snapshot.json" --test-id target.id
-loupe ui node "$REPORT/snapshot.json" --test-id target.id
+Required evidence:
+- host, report/snapshot path, compact or screen summary, targeted query/node
+- trace/output dirs plus fresh after-proof for each claimed change
+- screenshot-visible and queryable SwiftUI/bridge evidence kept separate
+- mutation output, effective-state proof, and reflect output when useful
+- exact unresolved gaps
 ```
-
-For physical-device failures, first check `references/runtime-modes.md`.

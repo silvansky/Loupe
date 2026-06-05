@@ -72,6 +72,11 @@ The desired shape is:
   `UIViewRepresentable` or `NSViewRepresentable` with only standard
   accessibility identifiers. Because it is attached with `background`, the
   platform probe follows the SwiftUI region bounds.
+- When a view-backed helper is not practical, a no-import helper can post
+  measured `dev.loupe.probe` bounds. Loupe registers those as synthetic
+  `LoupeRegisteredProbe` nodes. They are queryable by `testID` and role, but
+  are not backed by a platform view, so runtime activation and mutation should
+  be proved separately.
 
 Current implementation:
 
@@ -97,7 +102,7 @@ Chosen fixes:
 1. Keep injected examples dependency-free and use local zero-dependency probe
    helpers when a SwiftUI region frame is needed.
 2. Use bridge notifications for app-authored logs, metadata, reference
-   evidence, lifetime probes, and no-import probe registration.
+   evidence, lifetime probes, and no-import synthetic probe registration.
 3. For physical-device debug apps, link and embed dynamic `LoupeInjector`
    instead of importing `LoupeKit` and starting `LoupeServer` from app code.
 

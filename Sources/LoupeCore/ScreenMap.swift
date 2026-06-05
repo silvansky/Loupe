@@ -81,11 +81,17 @@ public enum LoupeScreenMapper {
             width: snapshot.screen.size.width,
             height: snapshot.screen.size.height
         )
+        let hasKnownScreenSize = snapshot.screen.size.width > 0 && snapshot.screen.size.height > 0
         let depths = nodeDepths(snapshot)
+        let surfaceVisibleRefs = options.includeHidden ? nil : LoupeSurfaceVisibility.visibleNodeRefs(in: snapshot)
         let elements = snapshot.nodes.values
             .filter { node in
-                guard options.includeHidden || node.isVisible else { return false }
-                guard node.frame.map({ $0.intersects(screenRect) }) ?? true else { return false }
+                guard options.includeHidden || LoupeSurfaceVisibility.isSurfaceVisible(
+                    node,
+                    in: snapshot,
+                    visibleRefs: surfaceVisibleRefs
+                ) else { return false }
+                guard !hasKnownScreenSize || node.frame.map({ $0.intersects(screenRect) }) ?? true else { return false }
                 return options.includeContainers || isScreenMapElement(node)
             }
             .sorted(by: screenOrder)

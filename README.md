@@ -143,8 +143,9 @@ use probes when an agent needs a durable region target:
 - Apps that import `LoupeKit` can use the public `.loupeProbe(...)` modifier.
 - Injected or no-import apps should use a local helper with a different name,
   such as `.localLoupeProbe(...)`, so it is not confused with the public API.
-- watchOS examples post measured `dev.loupe.probe` bounds instead of walking a
-  UIKit/AppKit view tree.
+- No-import helpers can use a view-backed probe for UIKit/AppKit-style trees, or
+  post measured `dev.loupe.probe` bounds when a synthetic probe is enough.
+  Synthetic probes are queryable evidence, not runtime activation targets.
 
 ## Act And Trace
 
@@ -173,14 +174,15 @@ loupe debug logs --host <runtime-host> --output /tmp/loupe-logs.json
 loupe debug network --host <runtime-host> --output /tmp/loupe-network.json
 loupe debug flags get new-nav --host <runtime-host>
 loupe debug keychain list --host <runtime-host>
-loupe ui audit loupe-report/snapshot.json --json
+loupe ui audit loupe-report/snapshot.json
 loupe ui hit-test --point 201,437 --host <runtime-host>
 loupe ui responder-chain --test-id login.button --host <runtime-host>
 ```
 
-Network evidence comes from LoupeKit's URLProtocol hook plus explicit
-app-authored events. Reference, object-graph, leak, flag, defaults, keychain,
-appearance, and scroll diagnostics are intended for development builds.
+Network evidence comes from LoupeKit fixture URLProtocol hooks plus explicit
+app-authored events. It is not a general packet sniffer. Reference,
+object-graph, leak, flag, defaults, keychain, appearance, and scroll
+diagnostics are intended for development builds.
 
 ## Runtime Mutation Probes
 
@@ -188,7 +190,7 @@ Runtime mutation is optional. Use it for quick design and debugging
 experiments, then verify the effective state before changing source.
 
 ```bash
-loupe ui mutations --udid <simulator-udid> --test-id checkout.card
+loupe ui mutations --udid <simulator-udid>
 loupe ui set --udid <simulator-udid> --test-id checkout.title text "Runtime title" --output mutation.json
 loupe ui set --udid <simulator-udid> --test-id checkout.card backgroundColor --color '#ff3366' --output mutation.json
 loupe ui reflect mutation.json --source ./Sources
@@ -218,6 +220,7 @@ Loupe to inspect and verify the running UI.
 - [Runtime Communication](Docs/RuntimeCommunication.md)
 - [Architecture Notes](Docs/LoupePlan.md)
 - [Figma Comparison](Docs/FigmaComparison.md)
+- [Open-Source App Validation](Docs/OpenSourceAppValidation.md)
 - [Homebrew Distribution](Docs/Homebrew.md)
 - [Development Homebrew Overlay](Docs/DevHomebrewOverlay.md)
 

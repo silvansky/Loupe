@@ -1,68 +1,64 @@
 # Actions And Mutations
 
-## Act
+Use this only when the task needs input, trace proof, mutation, self-sizing, or
+source reflection.
+
+## Action Shapes
 
 ```bash
-TRACE=/tmp/loupe-checkout-trace
-rm -rf "$TRACE"
-loupe act tap --test-id checkout.payButton --host <runtime-host> --udid <sim-udid> --trace-dir "$TRACE"
-loupe act tap --snapshot "$REPORT/snapshot.json" --ref n21 --udid <sim-udid>
-loupe act tap --x 201 --y 274 --udid <sim-udid> --width 438 --height 954
-loupe act swipe --from 219,760 --to 219,190 --host <runtime-host> --udid <sim-udid> --width 438 --height 954 --trace-dir "$TRACE"
-loupe act press select --host <runtime-host> --udid <tvos-sim-udid> --trace-dir "$TRACE"
-loupe debug scroll --test-id feed.list --delta 0,80 --host <runtime-host> --output /tmp/loupe-scroll-profile.json
-loupe debug trace summary "$TRACE"
-loupe debug trace diff "$TRACE/before-snapshot.json" "$TRACE/after-snapshot.json" --changed-only
+$LOUPE act tap --host <host> --snapshot <snapshot.json> --ref n21 --udid <sim-udid> --trace-dir <trace-dir>
+$LOUPE act tap --host <host> --x 201 --y 274 --width 438 --height 954 --udid <sim-udid> --trace-dir <trace-dir>
+$LOUPE act swipe --host <host> --from 219,760 --to 219,190 --udid <sim-udid> --trace-dir <trace-dir>
+$LOUPE act drag --host <host> --from 350,240 --to 80,240 --udid <sim-udid> --trace-dir <trace-dir>
+$LOUPE act type "example text" --host <host> --udid <sim-udid> --trace-dir <trace-dir>
+$LOUPE act wait value --host <host> --test-id feed.list --key uiKit.scrollView.contentOffset.y --equals 80 --output <wait.json>
+$LOUPE debug trace summary <trace-dir>
 ```
 
-Also use `act drag`, `act type`, `act press`, and `debug trace explore` when
-needed. Treat scroll with no offset or visible-frame change as failed unless
-`--no-verify-scroll` is intentional. Use `debug scroll --delta` or `--to-offset`
-for linked runtimes that can expose scroll state but do not have host HID scroll
-input.
+Use one fresh trace directory per attempt.
 
-Preserve failed trace paths until summarized or handed back. Remove successful
-trace dirs unless a later diff/audit needs them. Action traces use
-`before-snapshot.json`/`after-snapshot.json`; `ui set-many --trace-dir` uses
-`prev-snapshot.json`/`next-snapshot.json`.
+## Proof Rules
 
-## Mutate
+- Refs are snapshot-scoped. Recapture before acting when the screen may have
+  changed, or pass `--snapshot` when acting on a saved ref.
+- Prove action results with trace summary/diff plus fresh report, screenshot,
+  query, node, content offset, log, default, focus, or state evidence.
+- System permission alerts are outside the app runtime tree. Use screenshot or
+  host/simulator evidence; do not claim an app query tapped the alert.
+- `act type` writes into the current selection; focusing can select existing
+  text, so typing may replace instead of append. Traces redact requested input,
+  so prove the final value with a fresh report/query/node and never raw
+  secrets.
+- Secure inputs may still query as `textField`; prove security with
+  `uiKit.textField.isSecureTextEntry` and redacted text/value evidence.
+- `act wait`, `act drag`, and `debug scroll` need explicit postconditions:
+  selector, key or coordinates, output/trace path, expected state, and fresh
+  after-proof.
+- iOS/tvOS simulators use native HID. macOS tap is AppKit control activation.
+  watchOS, visionOS, and custom SwiftUI surfaces may correctly fail unless
+  trace/screenshot/report/probe/state evidence proves otherwise.
 
-Mutations are developer-only probes. Prefer stable `testID`; use `ref` only
-within the same observed screen.
+## Mutations
 
 ```bash
-loupe ui mutations --host <runtime-host> --test-id target.view
-loupe ui set --host <runtime-host> --test-id target.view alpha 0.5 --no-animate
-loupe ui set --host <runtime-host> --test-id cell.title layout.hugging.horizontal 260 --try-self-sizing --no-animate
-loupe ui set-many --host <runtime-host> --file /tmp/mutations.json --trace-dir /tmp/loupe-mutation-trace
-loupe act wait value --host <runtime-host> --test-id target.view alpha 0.5
-loupe ui reflect --host <runtime-host> --test-id target.view
+$LOUPE ui mutations --host <host>
+$LOUPE ui set --host <host> --snapshot <snapshot.json> --ref n21 textColor --color '#ff3366' --no-animate --output <set.json>
+$LOUPE ui set --host <host> --test-id cell.title layout.hugging.horizontal 260 --try-self-sizing --no-animate
+$LOUPE ui set-many --host <host> --refs n21,n22 alpha --number 0.5 --trace-dir <trace-dir>
+$LOUPE ui reflect <set.json> --source <source-root> --output <reflect.json>
 ```
 
-Use `--no-animate` when verification needs immediate state. Treat frame and Auto
-Layout mutations as probes until `loupe ui node` confirms the effective state.
-For collection/table cells on iOS 16+, `--try-self-sizing` only attempts UIKit's
-self-sizing invalidation when Loupe can identify a supported list context:
-flow-layout collection views with estimated item size, or automatic-height
-tables without delegate-owned row heights. It returns `selfSizingProbe` with the
-nearest container/cell, sizing owner, before/after frames, and the reason when
-it skips. If the result is `already-enabled`, do not repeat the self-sizing
-probe for the same container; continue with normal mutations and fresh
-effective-state checks.
-
-## Design QA
-
-For Figma, screenshot, or visual-reference work, capture a report, inspect
-anchors, run audit, then act and diff:
-
-```bash
-loupe ui audit "$REPORT/snapshot.json"
-loupe ui compare-design "$REPORT/snapshot.json" /path/to/design.json --limit 20
-```
-
-Reject wrong screen size, duplicated simulator chrome, scrolling fixed chrome,
-wrong scroll axis, bad key text/frame/color/corner metadata, untraceable routes,
-or unintended app state.
-
-For `compare-design`, match by `testID`, then role plus text, then geometry.
+- `ui mutations` lists live capabilities; it does not take a selector.
+- Prefer stable `testID`; use `ref` only from the current screen or with the
+  source snapshot for saved-ref mapping.
+- Dynamic table/collection cells can reuse refs. Mutate a current ref
+  immediately, save the mutation response, inspect requested/effective state,
+  and reflect that exact output.
+- Use `--no-animate` for deterministic verification. Frame and Auto Layout
+  mutations are probes until a fresh `ui node` confirms effective state.
+- `--try-self-sizing` is conservative. `applied` means Loupe invalidated a
+  supported list context; skip reasons such as `collection_layout_sizing_unknown`
+  or `delegate_size_for_item_owns_cell_size` are bounded results.
+- `ui reflect` returns ranked source hints, not an automatic patch. Empty
+  candidates or weak bridge hints can be correct; compare them with the
+  observed hierarchy before patching.

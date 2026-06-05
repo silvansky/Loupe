@@ -9,6 +9,7 @@ struct MutationSetOptions {
     var bundleID: String?
     var timeout: TimeInterval
     var outputURL: URL?
+    var snapshotURL: URL?
     var request: LoupeMutationRequest
 
     init(_ arguments: [String]) throws {
@@ -18,6 +19,7 @@ struct MutationSetOptions {
         bundleID = nil
         timeout = 5
         outputURL = nil
+        snapshotURL = nil
 
         var selector: LoupeMutationSelector?
         var property: String?
@@ -26,6 +28,7 @@ struct MutationSetOptions {
         var layout = true
         var animate = true
         var trySelfSizing = false
+        var includeHidden = false
         var animationDuration = 0.25
         var animationDelay = 0.0
         var animationCurve = "easeInOut"
@@ -45,6 +48,8 @@ struct MutationSetOptions {
                 timeout = try Self.double(after: "--timeout", in: arguments, index: &index)
             case "--output":
                 outputURL = URL(fileURLWithPath: try Self.value(after: "--output", in: arguments, index: &index))
+            case "--snapshot":
+                snapshotURL = URL(fileURLWithPath: try Self.value(after: "--snapshot", in: arguments, index: &index))
             case "--test-id", "--testID":
                 selector = LoupeMutationSelector(kind: .testID, value: try Self.value(after: arguments[index], in: arguments, index: &index))
             case "--ref":
@@ -88,6 +93,8 @@ struct MutationSetOptions {
                 animate = false
             case "--try-self-sizing":
                 trySelfSizing = true
+            case "--include-hidden":
+                includeHidden = true
             case "--duration":
                 animationDuration = try Self.double(after: "--duration", in: arguments, index: &index)
             case "--delay":
@@ -145,15 +152,17 @@ struct MutationSetOptions {
             value: value,
             layout: layout,
             animation: animation,
-            trySelfSizing: trySelfSizing
+            trySelfSizing: trySelfSizing,
+            includeHidden: includeHidden
         )
     }
 
     static let usage = """
-    Usage: loupe ui set (--test-id <id> | --ref <ref> | --role <role> | --text <text>) <property> <value> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]
+    Usage: loupe ui set (--test-id <id> | --ref <ref> | --role <role> | --text <text>) <property> <value> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--snapshot <snapshot.json>] [--include-hidden] [--output <path>]
            loupe ui set --test-id card.title text "New title"
            loupe ui set --test-id card backgroundColor --color '#ff3366'
            loupe ui set --test-id card.title text "New title" --output /tmp/loupe-set.json
+           loupe ui set --snapshot /tmp/loupe-report/snapshot.json --ref n21 textColor --color '#ff3366'
            loupe ui set --test-id card frame --rect 20,120,220,80
            loupe ui set --test-id card frame --rect 20,120,220,80 --duration 0.3
            loupe ui set --test-id card frame --rect 20,120,220,80 --no-animate
@@ -201,6 +210,12 @@ struct MutationSetOptions {
         if normalized == "center" || normalized.hasSuffix(".center") || normalized.hasSuffix("point") {
             return .point(try point(rawValue))
         }
+        if scalarSizeProperty(normalized) {
+            guard let value = Double(rawValue), value.isFinite else {
+                throw CLIError("Expected numeric value: \(rawValue)")
+            }
+            return value.rounded() == value ? .int(Int(value)) : .double(value)
+        }
         if normalized.contains("offset") || normalized.hasSuffix("size") {
             return .size(try size(rawValue))
         }
@@ -233,6 +248,12 @@ struct MutationSetOptions {
             || normalizedProperty == "accessibility.hint"
             || normalizedProperty == "accessibility.identifier"
             || normalizedProperty == "testid"
+    }
+
+    private static func scalarSizeProperty(_ normalizedProperty: String) -> Bool {
+        normalizedProperty == "fontsize"
+            || normalizedProperty == "font.size"
+            || normalizedProperty == "style.fontsize"
     }
 
     private static func bool(_ rawValue: String) throws -> Bool {

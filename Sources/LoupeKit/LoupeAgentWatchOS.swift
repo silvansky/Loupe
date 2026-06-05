@@ -2,6 +2,8 @@ import Foundation
 import LoupeCore
 
 #if os(watchOS)
+import WatchKit
+
 @MainActor
 public final class LoupeAgent {
     public init() {}
@@ -10,11 +12,14 @@ public final class LoupeAgent {
         let appRef = "n0"
         var nodes: [String: LoupeNode] = [:]
         let probes = LoupeRuntime.shared.registeredProbes()
-        let probeRefs = probes.enumerated().map { index, probe -> String in
+        let screen = currentWatchScreen()
+        let probeRefs = probes.indices.map { "n\($0 + 1)" }
+        let parentRefs = probeParentRefs(probes: probes, refs: probeRefs, appRef: appRef)
+        for (index, probe) in probes.enumerated() {
             let ref = "n\(index + 1)"
             nodes[ref] = LoupeNode(
                 ref: ref,
-                parentRef: appRef,
+                parentRef: parentRefs[ref] ?? appRef,
                 kind: .view,
                 typeName: "LoupeWatchProbe",
                 role: probe.role,
@@ -35,8 +40,17 @@ public final class LoupeAgent {
                 ),
                 custom: mergedMetadata(probe.metadata, with: LoupeRuntime.shared.metadata(forTestID: probe.id))
             )
-            return ref
         }
+
+        for ref in probeRefs {
+            guard let parentRef = parentRefs[ref] else {
+                continue
+            }
+            if parentRef != appRef {
+                nodes[parentRef]?.children.append(ref)
+            }
+        }
+        let rootProbeRefs = probeRefs.filter { parentRefs[$0] == appRef }
 
         nodes[appRef] = LoupeNode(
             ref: appRef,
@@ -44,7 +58,7 @@ public final class LoupeAgent {
             kind: .application,
             typeName: "WKApplication",
             role: "application",
-            frame: nil,
+            frame: LoupeRect(x: 0, y: 0, width: screen.size.width, height: screen.size.height),
             isVisible: true,
             isEnabled: true,
             isInteractive: false,
@@ -52,13 +66,13 @@ public final class LoupeAgent {
                 "platform": .string("watchOS"),
                 "observationBackend": .string("registered-probes"),
             ],
-            children: probeRefs
+            children: rootProbeRefs
         )
 
         return LoupeSnapshot(
             id: UUID().uuidString,
             capturedAt: Date(),
-            screen: LoupeScreen(size: LoupeSize(width: 0, height: 0), scale: 1),
+            screen: screen,
             rootRefs: [appRef],
             nodes: nodes
         )
@@ -182,6 +196,71 @@ private func defaultObject(from value: LoupeMetadataValue) -> Any {
         return value
     case let .double(value):
         return value
+    }
+}
+
+private func currentWatchScreen() -> LoupeScreen {
+    let device = WKInterfaceDevice.current()
+    let bounds = device.screenBounds
+    return LoupeScreen(
+        size: LoupeSize(
+            width: finiteDouble(Double(bounds.width)) ?? 0,
+            height: finiteDouble(Double(bounds.height)) ?? 0
+        ),
+        scale: finiteDouble(Double(device.screenScale)) ?? 1
+    )
+}
+
+private func finiteDouble(_ value: Double) -> Double? {
+    value.isFinite ? value : nil
+}
+
+private func probeParentRefs(
+    probes: [LoupeRegisteredProbe],
+    refs: [String],
+    appRef: String
+) -> [String: String] {
+    var parents: [String: String] = [:]
+    for (index, probe) in probes.enumerated() {
+        let ref = refs[index]
+        guard let frame = probe.frame else {
+            parents[ref] = appRef
+            continue
+        }
+
+        let parentIndex = probes.indices
+            .filter { $0 != index }
+            .filter { candidateIndex in
+                guard let candidateFrame = probes[candidateIndex].frame else {
+                    return false
+                }
+                guard candidateFrame.area > frame.area + 1 else {
+                    return false
+                }
+                return candidateFrame.contains(frame, tolerance: 1)
+            }
+            .min { lhs, rhs in
+                guard let lhsFrame = probes[lhs].frame, let rhsFrame = probes[rhs].frame else {
+                    return lhs < rhs
+                }
+                let lhsArea = lhsFrame.area
+                let rhsArea = rhsFrame.area
+                if abs(lhsArea - rhsArea) > 0.001 {
+                    return lhsArea < rhsArea
+                }
+                // Equal-size SwiftUI probes often represent nested regions that
+                // register later than the broad root probe.
+                return lhs > rhs
+            }
+
+        parents[ref] = parentIndex.map { refs[$0] } ?? appRef
+    }
+    return parents
+}
+
+private extension LoupeRect {
+    var area: Double {
+        max(0, width) * max(0, height)
     }
 }
 #endif

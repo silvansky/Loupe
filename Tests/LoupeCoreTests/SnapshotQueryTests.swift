@@ -38,6 +38,110 @@ struct SnapshotQueryTests {
         #expect(results.map { $0.ref } == ["n2", "n1"])
     }
 
+    @Test func findByTestIDPrefersPlatformBackedProbeOverSyntheticProbe() {
+        let snapshot = makeSnapshot(nodes: [
+            LoupeNode(
+                ref: "synthetic",
+                parentRef: nil,
+                kind: .view,
+                typeName: "LoupeRegisteredProbe",
+                role: "button",
+                testID: "openimmersive.enterStreamURL",
+                text: "Enter Stream URL",
+                frame: LoupeRect(x: 725.5, y: 526, width: 207.5, height: 44),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: true,
+                custom: [
+                    "synthetic": .bool(true),
+                    "observationBackend": .string("registered-probes"),
+                ]
+            ),
+            LoupeNode(
+                ref: "backing",
+                parentRef: nil,
+                kind: .view,
+                typeName: "LoupeFallbackFrameView",
+                role: "button",
+                testID: "openimmersive.enterStreamURL",
+                text: "Enter Stream URL",
+                frame: LoupeRect(x: 485.5, y: 591, width: 207.5, height: 44),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: true
+            ),
+        ])
+
+        let results = LoupeSnapshotQuery.find(
+            .testID("openimmersive.enterStreamURL"),
+            in: snapshot,
+            options: LoupeQueryOptions(includeHidden: true)
+        )
+
+        #expect(results.map { $0.ref } == ["backing", "synthetic"])
+    }
+
+    @Test func platformBackedPreferenceDropsOnlySyntheticDuplicateWithSameSemantics() {
+        let snapshot = makeSnapshot(nodes: [
+            LoupeNode(
+                ref: "synthetic",
+                parentRef: nil,
+                kind: .view,
+                typeName: "LoupeRegisteredProbe",
+                role: "button",
+                testID: "openimmersive.enterStreamURL",
+                text: "Enter Stream URL",
+                frame: LoupeRect(x: 725.5, y: 526, width: 207.5, height: 44),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: true,
+                custom: [
+                    "synthetic": .bool(true),
+                    "observationBackend": .string("registered-probes"),
+                ]
+            ),
+            LoupeNode(
+                ref: "backing",
+                parentRef: nil,
+                kind: .view,
+                typeName: "LoupeFallbackFrameView",
+                role: "button",
+                testID: "openimmersive.enterStreamURL",
+                text: "Enter Stream URL",
+                frame: LoupeRect(x: 485.5, y: 591, width: 207.5, height: 44),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: true
+            ),
+            LoupeNode(
+                ref: "differentProbe",
+                parentRef: nil,
+                kind: .view,
+                typeName: "LoupeRegisteredProbe",
+                role: "button",
+                testID: "openimmersive.openBookmarks",
+                text: "Bookmarks",
+                frame: LoupeRect(x: 500, y: 650, width: 160, height: 44),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: true,
+                custom: [
+                    "synthetic": .bool(true),
+                    "observationBackend": .string("registered-probes"),
+                ]
+            ),
+        ])
+        let matches = [
+            LoupeQueryResult(node: snapshot.nodes["synthetic"]!),
+            LoupeQueryResult(node: snapshot.nodes["backing"]!),
+            LoupeQueryResult(node: snapshot.nodes["differentProbe"]!),
+        ]
+
+        let filtered = LoupeSnapshotQuery.preferPlatformBackedMatches(matches, in: snapshot)
+
+        #expect(filtered.map(\.ref) == ["backing", "differentProbe"])
+    }
+
     @Test func findByTextCanUsePartialCaseInsensitiveMatching() {
         let snapshot = makeSnapshot(nodes: [
             LoupeNode(
@@ -82,6 +186,89 @@ struct SnapshotQueryTests {
                 in: snapshot,
                 options: LoupeQueryOptions(includeHidden: true)
             ).map { $0.ref } == ["n1"]
+        )
+    }
+
+    @Test func includeHiddenResultsPreferVisibleMatches() {
+        let snapshot = makeSnapshot(nodes: [
+            LoupeNode(
+                ref: "offscreen",
+                parentRef: nil,
+                kind: .view,
+                typeName: "UILabel",
+                role: "staticText",
+                text: "Repeated title",
+                frame: LoupeRect(x: 24, y: -120, width: 200, height: 40),
+                isVisible: false,
+                isEnabled: true,
+                isInteractive: false
+            ),
+            LoupeNode(
+                ref: "visible",
+                parentRef: nil,
+                kind: .view,
+                typeName: "UILabel",
+                role: "staticText",
+                text: "Repeated title",
+                frame: LoupeRect(x: 24, y: 240, width: 200, height: 40),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: false
+            ),
+        ])
+
+        let results = LoupeSnapshotQuery.find(
+            .text("Repeated title", exact: true),
+            in: snapshot,
+            options: LoupeQueryOptions(includeHidden: true)
+        )
+
+        #expect(results.map { $0.ref } == ["visible", "offscreen"])
+    }
+
+    @Test func occlusionVisibilityIncludesOffscreenVisibleNodesButNotHiddenNodes() {
+        let snapshot = makeSnapshot(nodes: [
+            LoupeNode(
+                ref: "hidden",
+                parentRef: nil,
+                kind: .view,
+                typeName: "UILabel",
+                role: "staticText",
+                testID: "fixture.card",
+                text: "Fixture",
+                frame: LoupeRect(x: 24, y: 160, width: 200, height: 40),
+                isVisible: false,
+                isEnabled: true,
+                isInteractive: false
+            ),
+            LoupeNode(
+                ref: "offscreen",
+                parentRef: nil,
+                kind: .view,
+                typeName: "UILabel",
+                role: "staticText",
+                testID: "fixture.card",
+                text: "Fixture",
+                frame: LoupeRect(x: 24, y: 900, width: 200, height: 40),
+                isVisible: true,
+                isEnabled: true,
+                isInteractive: false
+            ),
+        ])
+
+        #expect(
+            LoupeSnapshotQuery.find(
+                .testID("fixture.card"),
+                in: snapshot,
+                options: LoupeQueryOptions(visibilityMode: .surface)
+            ).isEmpty
+        )
+        #expect(
+            LoupeSnapshotQuery.find(
+                .testID("fixture.card"),
+                in: snapshot,
+                options: LoupeQueryOptions(visibilityMode: .occlusion)
+            ).map { $0.ref } == ["offscreen"]
         )
     }
 

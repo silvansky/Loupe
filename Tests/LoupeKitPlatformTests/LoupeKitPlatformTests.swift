@@ -132,6 +132,53 @@ import SwiftUI
         #expect(runtime.registeredProbes().contains { $0.id == id } == false)
     }
 
+    @Test func registeredProbeNodeIsQueryableInSnapshots() {
+        let probe = LoupeRegisteredProbe(
+            id: "platform.notification.probe",
+            label: "Notification probe",
+            role: "button",
+            frame: LoupeRect(x: 11, y: 22, width: 33, height: 44),
+            isVisible: true,
+            isEnabled: true,
+            isInteractive: true,
+            metadata: ["loupe.probe": .bool(true)]
+        )
+        let root = LoupeNode(
+            ref: "n1",
+            parentRef: nil,
+            kind: .application,
+            typeName: "UIApplication",
+            role: "application",
+            frame: LoupeRect(x: 0, y: 0, width: 390, height: 844),
+            isVisible: true,
+            isEnabled: true,
+            isInteractive: false,
+            children: ["n2"]
+        )
+        let node = loupeRegisteredProbeNode(
+            probe,
+            ref: "n2",
+            parentRef: "n1",
+            runtimeMetadata: ["screen": .string("platform")]
+        )
+        let snapshot = LoupeSnapshot(
+            id: "s1",
+            capturedAt: Date(timeIntervalSince1970: 0),
+            screen: LoupeScreen(size: LoupeSize(width: 390, height: 844), scale: 3),
+            rootRefs: ["n1"],
+            nodes: [
+                "n1": root,
+                "n2": node,
+            ]
+        )
+
+        #expect(LoupeSnapshotQuery.find(.testID("platform.notification.probe"), in: snapshot).map(\.ref) == ["n2"])
+        #expect(LoupeSnapshotQuery.find(.role("button"), in: snapshot).map(\.ref) == ["n2"])
+        #expect(node.custom["screen"] == .string("platform"))
+        #expect(node.custom["synthetic"] == .bool(true))
+        #expect(node.custom["observationBackend"] == .string("registered-probes"))
+    }
+
     @MainActor
     @Test func runtimeReferenceEvidenceKeepsMostRecentFiveHundredEntries() {
         let runtime = LoupeRuntime.shared

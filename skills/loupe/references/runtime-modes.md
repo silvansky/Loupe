@@ -1,92 +1,75 @@
 # Runtime Modes
 
-## Simulator Injection
+Use this when choosing how Loupe attaches, or when launch works but observation
+does not.
 
-Simulator apps do not need a Loupe dependency:
+## iOS/tvOS Simulator Injection
 
 ```bash
-xcrun simctl install booted /path/to/App.app
-loupe app launch --bundle-id com.example.App --inject
+$LOUPE app launch --device <sim-udid> --bundle-id com.example.App --inject
 ```
 
-`loupe app launch` injects by default for iOS/tvOS Simulator apps when no other
-mode is selected. Use `loupe injector-path` when debugging injector resolution.
+- `app launch` prints the runtime host. Prefer that host for the scenario.
+- External `.app` bundles must already be installed with
+  `xcrun simctl install <udid> /path/App.app`; `app launch` launches and
+  attaches, not installs.
+- For repo-local validation, rebuild and pass the local injector with
+  `LOUPE_INJECTOR_PATH` so stale installed artifacts cannot mask the result.
+- If multiple simulators are booted, pass the explicit UDID to action commands.
+- Unsigned real-app builds may crash before observation because of CloudKit, app
+  groups, widgets, or entitlements. A documented external-only env bypass is
+  acceptable when crash evidence is preserved.
 
 ## Physical Device
 
-Real-device `DYLD_INSERT_LIBRARIES` launch injection is not available. For iOS
-physical-device debug builds, add the dynamic Swift package product
-`LoupeInjector` to the Debug app target:
+Real-device launch injection is not available. Debug builds link/embed the
+dynamic `LoupeInjector` product; it depends on `LoupeKit` internally and starts
+Loupe automatically when loaded. Do not include it in App Store release builds.
 
-- Link `LoupeInjector`.
-- Embed & Sign `LoupeInjector.framework`.
-- Keep `LD_RUNPATH_SEARCH_PATHS` including `@executable_path/Frameworks`.
-- Exclude Loupe from App Store release builds.
+Use `ui` and `debug` with the selected host. Simulator HID commands remain
+simulator-only; runtime tap works only for supported activation targets.
 
-`LoupeInjector` depends on `LoupeKit` internally. The app should not call
-`LoupeServer.start()` for this path. `LoupeInjectionBootstrap` runs when the
-dynamic library loads, calls `LoupeInjectorStart`, activates the bridge, and
-starts `LoupeServer` using `LOUPE_PORT` and `LOUPE_BIND_HOST`.
+## macOS Host Runtime
+
+Inject at process launch, then address the runtime by host:
 
 ```bash
-loupe app launch \
-  --bundle-id com.example.DeviceApp \
-  --device <physical-device-id> \
-  --linked \
-  --host http://<device-ip>:8765 \
-  --port 8765 \
-  --bind-host 0.0.0.0
-
-loupe app use --host http://<device-ip>:8765
+open -n -F --env LOUPE_PORT=28749 --env LOUPE_BIND_HOST=127.0.0.1 \
+  --env DYLD_INSERT_LIBRARIES=/path/to/libLoupeInjector.dylib /path/to/App.app
+$LOUPE app info --host http://127.0.0.1:28749
 ```
 
-Use `--bind-host 0.0.0.0` only for debug builds that need Mac-to-device
-reachability. Keep linked apps on `127.0.0.1` otherwise.
+- Prefer `app info --host`; `app current` may point at a previous runtime.
+- `/health` alone is not proof. Some apps exit before `/snapshot` or block the
+  main thread while `/health` still responds.
+- Non-simulator macOS reports may not include screenshots.
+- Runtime tap is AppKit control activation, not general pointer input. Custom
+  editor, terminal, canvas, outline/table, and SwiftUI host views can correctly
+  fail with `unsupported_activation_target`.
+
+## watchOS Simulator
+
+watchOS can capture runtime state, screenshots, logs, defaults, and probes.
+There is no UIKit/AppKit walker, so pure SwiftUI can legitimately show only
+`WKApplication`. Use sparse `.loupeProbe(...)` or `dev.loupe.probe` anchors and
+prove routes with fresh report, screenshot, probe, log, default, or trace
+evidence.
+
+## visionOS Simulator
+
+Reports can include full compositor screenshots while snapshots use app-window
+coordinates. SwiftUI/RealityKit content may be screenshot-visible but
+query-sparse; use hit-test, responder-chain, geometry/style, probes, logs,
+defaults, and fresh screenshots/reports for proof.
 
 ## Runtime Selection
 
-Observation commands can use `--bundle-id` or `--host`. Simulator action
-commands do not accept `--bundle-id`; run:
-
 ```bash
-loupe app use <bundle-id> --udid <sim-udid>
+$LOUPE app list
+$LOUPE app use <bundle-id-or-host>
+$LOUPE app current
+$LOUPE app info --host <runtime-host>
 ```
 
-or pass:
-
-```bash
---host <runtime-host> --udid <sim-udid>
-```
-
-If multiple simulators are booted, do not use `--udid booted`; use the UDID from
-`loupe app current` or `loupe app list`.
-
-For physical-device linked runtimes, use `ui` and `debug` commands with `--host`
-or the selected current runtime. Native HID `act swipe`, `act drag`, `act type`,
-and simulator `press` remain simulator-only. Use
-`act tap --backend runtime --host <runtime-host>` only where runtime activation
-is supported.
-
-## Troubleshooting
-
-If `loupe app launch --linked` fails on an older iOS device, CoreDevice may not
-support it. Launch the LoupeInjector-linked debug app manually from Xcode, then
-select it with:
-
-```bash
-loupe app use --host <runtime-host>
-```
-
-If a physical-device app exits immediately, verify the embedded framework and
-runpath:
-
-```bash
-find /path/to/App.app -maxdepth 4 -type f | rg 'LoupeInjector|Frameworks'
-otool -L /path/to/App.app/AppBinary | rg 'LoupeInjector|@rpath'
-```
-
-The expected bundle includes:
-
-```text
-App.app/Frameworks/LoupeInjector.framework/LoupeInjector
-```
+Use the printed launch host when possible. `app list` is inventory, not proof
+that a runtime is still current; use `app cleanup` when old records get noisy.

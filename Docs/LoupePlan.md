@@ -104,7 +104,7 @@ requested value. Support is allowlisted, not arbitrary Objective-C selector
 execution.
 
 ```bash
-loupe ui mutations --test-id checkout.card
+loupe ui mutations
 loupe ui set --test-id checkout.title text "New title" --output /tmp/loupe-set.json
 loupe ui set --test-id checkout.card backgroundColor --color '#ff3366'
 loupe ui set --test-id checkout.card frame --rect 20,120,220,80 --no-animate

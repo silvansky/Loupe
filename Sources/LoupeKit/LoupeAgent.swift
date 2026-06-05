@@ -92,6 +92,17 @@ public final class LoupeAgent {
             sceneRefs.append(sceneRef)
         }
 
+        let registeredProbeRefs = LoupeRuntime.shared.registeredProbes().map { probe in
+            let ref = makeRef()
+            nodes[ref] = loupeRegisteredProbeNode(
+                probe,
+                ref: ref,
+                parentRef: appRef,
+                runtimeMetadata: LoupeRuntime.shared.metadata(forTestID: probe.id)
+            )
+            return ref
+        }
+
         nodes[appRef] = LoupeNode(
             ref: appRef,
             parentRef: nil,
@@ -107,7 +118,7 @@ public final class LoupeAgent {
             isVisible: true,
             isEnabled: true,
             isInteractive: false,
-            children: sceneRefs
+            children: sceneRefs + registeredProbeRefs
         )
 
         let snapshot = LoupeSnapshot(
@@ -281,6 +292,7 @@ public final class LoupeAgent {
 
         let testID = view.accessibilityIdentifier ?? stringMetadata("id", from: view.loupeMetadata)
         let customMetadata = mergedMetadata(view.loupeMetadata, with: LoupeRuntime.shared.metadata(forTestID: testID))
+        let accessibility = accessibility(for: view)
 
         nodes[ref] = LoupeNode(
             ref: ref,
@@ -289,8 +301,8 @@ public final class LoupeAgent {
             typeName: typeName(of: view),
             role: role(for: view),
             testID: testID,
-            label: view.accessibilityLabel,
-            value: view.accessibilityValue,
+            label: accessibility.label,
+            value: accessibility.value,
             placeholder: placeholder(for: view),
             text: text(for: view),
             renderedText: renderedText(for: view),
@@ -300,7 +312,7 @@ public final class LoupeAgent {
             isEnabled: isEnabled(view),
             isInteractive: isInteractive(view),
             style: style(for: view),
-            accessibility: accessibility(for: view),
+            accessibility: accessibility,
             runtime: runtimeProperties(for: view),
             uiKit: uiKitProperties(for: view),
             custom: customMetadata,
@@ -318,6 +330,7 @@ public final class LoupeAgent {
 
         var tree = LoupeAccessibilityTree.build(from: snapshot)
         var signatures = Set(tree.nodes.values.map(nativeAccessibilitySignature(for:)))
+        let accessibilityVisibleRefs = LoupeSurfaceVisibility.visibleNodeRefs(in: snapshot, includesOffscreen: true)
 
         for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
             for window in scene.windows {
@@ -325,6 +338,7 @@ public final class LoupeAgent {
                     in: window,
                     snapshot: snapshot,
                     viewRefs: viewRefs,
+                    accessibilityVisibleRefs: accessibilityVisibleRefs,
                     tree: &tree,
                     signatures: &signatures
                 )
@@ -338,6 +352,7 @@ public final class LoupeAgent {
         in view: UIView,
         snapshot: LoupeSnapshot,
         viewRefs: [ObjectIdentifier: String],
+        accessibilityVisibleRefs: Set<String>,
         tree: inout LoupeAccessibilityTree,
         signatures: inout Set<String>
     ) {
@@ -347,6 +362,7 @@ public final class LoupeAgent {
                     in: $0,
                     snapshot: snapshot,
                     viewRefs: viewRefs,
+                    accessibilityVisibleRefs: accessibilityVisibleRefs,
                     tree: &tree,
                     signatures: &signatures
                 )
@@ -364,6 +380,7 @@ public final class LoupeAgent {
                 for: element,
                 sourceRef: sourceRef,
                 snapshot: snapshot,
+                accessibilityVisibleRefs: accessibilityVisibleRefs,
                 tree: tree
             ) else {
                 continue
@@ -395,6 +412,7 @@ public final class LoupeAgent {
                 in: $0,
                 snapshot: snapshot,
                 viewRefs: viewRefs,
+                accessibilityVisibleRefs: accessibilityVisibleRefs,
                 tree: &tree,
                 signatures: &signatures
             )
@@ -405,6 +423,7 @@ public final class LoupeAgent {
         for element: NSObject,
         sourceRef: String,
         snapshot: LoupeSnapshot,
+        accessibilityVisibleRefs: Set<String>,
         tree: LoupeAccessibilityTree
     ) -> LoupeAccessibilityNode? {
         let testID = accessibilityIdentifier(for: element)
@@ -425,9 +444,12 @@ public final class LoupeAgent {
             return nil
         }
 
-        let isVisible = !element.accessibilityElementsHidden
+        let sourceSurfaceVisible = snapshot.nodes[sourceRef].map {
+            $0.isVisible && accessibilityVisibleRefs.contains($0.ref)
+        } ?? true
+        let isVisible = sourceSurfaceVisible
+            && !element.accessibilityElementsHidden
             && !frame.isEmpty
-            && intersectsScreen(frame, screen: snapshot.screen.size)
 
         return LoupeAccessibilityNode(
             ref: makeNativeAccessibilityRef(sourceRef: sourceRef),
@@ -607,6 +629,9 @@ func text(for view: UIView) -> String? {
     }
 
     if let textField = view as? UITextField {
+        if textField.isSecureTextEntry {
+            return redactedSecureText(for: textField.text)
+        }
         return textField.text
     }
 
@@ -644,6 +669,13 @@ private func semanticText(for view: UIView) -> String? {
 @MainActor
 private func placeholder(for view: UIView) -> String? {
     (view as? UITextField)?.placeholder
+}
+
+private func redactedSecureText(for text: String?) -> String? {
+    guard nonEmpty(text) != nil else {
+        return nil
+    }
+    return "••••••••"
 }
 
 @MainActor
@@ -955,10 +987,17 @@ private func interfaceStyleName(_ style: UIUserInterfaceStyle) -> String {
 
 @MainActor
 private func accessibility(for view: UIView) -> LoupeAccessibility {
-    LoupeAccessibility(
+    let value: String?
+    if let textField = view as? UITextField, textField.isSecureTextEntry {
+        value = redactedSecureText(for: textField.accessibilityValue ?? textField.text)
+    } else {
+        value = view.accessibilityValue
+    }
+
+    return LoupeAccessibility(
         identifier: view.accessibilityIdentifier,
         label: view.accessibilityLabel,
-        value: view.accessibilityValue,
+        value: value,
         hint: view.accessibilityHint,
         traits: accessibilityTraits(view.accessibilityTraits),
         frame: frameInScreen(for: view),
@@ -1152,7 +1191,8 @@ private func textFieldProperties(for view: UIView) -> LoupeUITextFieldProperties
     }
     return LoupeUITextFieldProperties(
         textAlignment: textAlignmentName(textField.textAlignment),
-        borderStyle: borderStyleName(textField.borderStyle)
+        borderStyle: borderStyleName(textField.borderStyle),
+        isSecureTextEntry: textField.isSecureTextEntry
     )
 }
 

@@ -11,7 +11,7 @@ public struct LoupeNodeSummary: Codable, Equatable {
     public var isVisible: Bool
     public var isInteractive: Bool
 
-    public init(node: LoupeNode) {
+    public init(node: LoupeNode, isVisible: Bool? = nil) {
         ref = node.ref
         typeName = node.typeName
         className = node.uiKit?.className
@@ -19,7 +19,7 @@ public struct LoupeNodeSummary: Codable, Equatable {
         text = LoupeObservationCompactor.displayText(for: node)
         testID = node.testID
         frame = node.frame
-        isVisible = node.isVisible
+        self.isVisible = isVisible ?? node.isVisible
         isInteractive = node.isInteractive
     }
 }
@@ -62,26 +62,29 @@ public enum LoupeSnapshotInspector {
         options: LoupeQueryOptions = LoupeQueryOptions()
     ) -> LoupeNodeInspection? {
         guard
-            let result = LoupeSnapshotQuery.first(selector, in: snapshot, options: options),
-            let node = snapshot.nodes[result.ref]
+            let result = LoupeSnapshotQuery.first(selector, in: snapshot, options: inspectionOptions(from: options)),
+            var node = snapshot.nodes[result.ref]
         else {
             return nil
         }
 
+        let visibleRefs = inspectionVisibleRefs(in: snapshot, options: options)
+        node.isVisible = effectiveVisibility(for: node, visibleRefs: visibleRefs)
+
         let parent = node.parentRef
             .flatMap { snapshot.nodes[$0] }
-            .map(LoupeNodeSummary.init)
+            .map { LoupeNodeSummary(node: $0, isVisible: effectiveVisibility(for: $0, visibleRefs: visibleRefs)) }
 
         let siblings = node.parentRef
             .flatMap { snapshot.nodes[$0] }?
             .children
             .filter { $0 != node.ref }
             .compactMap { snapshot.nodes[$0] }
-            .map(LoupeNodeSummary.init) ?? []
+            .map { LoupeNodeSummary(node: $0, isVisible: effectiveVisibility(for: $0, visibleRefs: visibleRefs)) } ?? []
 
         let children = node.children
             .compactMap { snapshot.nodes[$0] }
-            .map(LoupeNodeSummary.init)
+            .map { LoupeNodeSummary(node: $0, isVisible: effectiveVisibility(for: $0, visibleRefs: visibleRefs)) }
 
         return LoupeNodeInspection(
             node: node,
@@ -99,7 +102,7 @@ public enum LoupeSnapshotInspector {
     ) -> LoupeSubtree? {
         guard
             maxDepth >= 0,
-            let result = LoupeSnapshotQuery.first(selector, in: snapshot, options: options),
+            let result = LoupeSnapshotQuery.first(selector, in: snapshot, options: inspectionOptions(from: options)),
             let root = snapshot.nodes[result.ref]
         else {
             return nil
@@ -108,6 +111,26 @@ public enum LoupeSnapshotInspector {
         var included: [String: LoupeNode] = [:]
         collectSubtree(root, in: snapshot, depth: 0, maxDepth: maxDepth, included: &included)
         return LoupeSubtree(root: root, maxDepth: maxDepth, nodes: included)
+    }
+
+    private static func inspectionOptions(from options: LoupeQueryOptions) -> LoupeQueryOptions {
+        LoupeQueryOptions(
+            includeHidden: options.includeHidden,
+            includeDisabled: options.includeDisabled,
+            maxResults: options.maxResults,
+            visibilityMode: .occlusion
+        )
+    }
+
+    private static func inspectionVisibleRefs(in snapshot: LoupeSnapshot, options: LoupeQueryOptions) -> Set<String>? {
+        guard !options.includeHidden else {
+            return nil
+        }
+        return LoupeSurfaceVisibility.visibleNodeRefs(in: snapshot, includesOffscreen: true)
+    }
+
+    private static func effectiveVisibility(for node: LoupeNode, visibleRefs: Set<String>?) -> Bool {
+        visibleRefs?.contains(node.ref) ?? node.isVisible
     }
 
     private static func collectSubtree(

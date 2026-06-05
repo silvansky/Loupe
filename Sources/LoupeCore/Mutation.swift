@@ -111,6 +111,7 @@ public struct LoupeMutationRequest: Codable, Equatable {
     public var layout: Bool
     public var animation: LoupeMutationAnimation?
     public var trySelfSizing: Bool
+    public var includeHidden: Bool
 
     public init(
         selector: LoupeMutationSelector,
@@ -118,7 +119,8 @@ public struct LoupeMutationRequest: Codable, Equatable {
         value: LoupeMutationValue,
         layout: Bool = true,
         animation: LoupeMutationAnimation? = nil,
-        trySelfSizing: Bool = false
+        trySelfSizing: Bool = false,
+        includeHidden: Bool = false
     ) {
         self.selector = selector
         self.property = property
@@ -126,6 +128,7 @@ public struct LoupeMutationRequest: Codable, Equatable {
         self.layout = layout
         self.animation = animation
         self.trySelfSizing = trySelfSizing
+        self.includeHidden = includeHidden
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -135,6 +138,7 @@ public struct LoupeMutationRequest: Codable, Equatable {
         case layout
         case animation
         case trySelfSizing
+        case includeHidden
     }
 
     public init(from decoder: Decoder) throws {
@@ -145,6 +149,7 @@ public struct LoupeMutationRequest: Codable, Equatable {
         layout = try container.decodeIfPresent(Bool.self, forKey: .layout) ?? true
         animation = try container.decodeIfPresent(LoupeMutationAnimation.self, forKey: .animation)
         trySelfSizing = try container.decodeIfPresent(Bool.self, forKey: .trySelfSizing) ?? false
+        includeHidden = try container.decodeIfPresent(Bool.self, forKey: .includeHidden) ?? false
     }
 }
 
@@ -428,17 +433,20 @@ public struct LoupeMutationNodeSummary: Codable, Equatable {
 public struct LoupeMutationHierarchyContext: Codable, Equatable {
     public var target: LoupeMutationNodeSummary
     public var parent: LoupeMutationNodeSummary?
+    public var ancestors: [LoupeMutationNodeSummary]?
     public var siblings: [LoupeMutationNodeSummary]
     public var children: [LoupeMutationNodeSummary]
 
     public init(
         target: LoupeMutationNodeSummary,
         parent: LoupeMutationNodeSummary? = nil,
+        ancestors: [LoupeMutationNodeSummary]? = nil,
         siblings: [LoupeMutationNodeSummary] = [],
         children: [LoupeMutationNodeSummary] = []
     ) {
         self.target = target
         self.parent = parent
+        self.ancestors = ancestors
         self.siblings = siblings
         self.children = children
     }

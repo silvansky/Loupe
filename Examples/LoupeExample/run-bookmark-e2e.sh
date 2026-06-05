@@ -38,7 +38,7 @@ booted_udid() {
   ' <"$list_path"
 }
 
-DEVICE="${LOUPE_BOOKMARK_DEVICE:-$(booted_udid)}"
+DEVICE="${LOUPE_BOOKMARK_DEVICE:-${LOUPE_DEVICE:-$(booted_udid)}}"
 if [[ -z "$DEVICE" ]]; then
   DEVICES_PATH="/tmp/loupe-bookmark-available-devices.txt"
   run_with_timeout "$(simctl_list_timeout)" xcrun simctl list devices available >"$DEVICES_PATH"

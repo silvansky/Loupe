@@ -46,7 +46,7 @@ import Testing
     @Test func groupedCommandUsageFirstLinesStayStable() throws {
         let expectedUsage: [String: String] = [
             "app": "Usage: loupe app <subcommand>",
-            "app launch": "Usage: loupe app launch --bundle-id <id> [--device <sim|device>] [--inject|--linked] [--host <url>] [--port <port>] [--bind-host <ip>] [--env KEY=VALUE] [--timeout <seconds>]",
+            "app launch": "Usage: loupe app launch --bundle-id <id> [--device <sim|device|udid>] [--inject|--linked] [--host <url>] [--port <port>] [--bind-host <ip>] [--env KEY=VALUE] [--timeout <seconds>]",
             "app list": "Usage: loupe app list [--json] [--timeout <seconds>]",
             "app use": "Usage: loupe app use <bundle-id> | --bundle-id <id> | --host <url> [--udid <sim>]",
             "app current": "Usage: loupe app current [--json] [--timeout <seconds>]",
@@ -56,11 +56,15 @@ import Testing
             "ui snapshot": "Usage: loupe ui snapshot [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>] [--timeout <seconds>]",
             "ui tree": "Usage: loupe ui tree [snapshot.json] [--host <url>] [--udid <sim>] [--bundle-id <id>] [--view|--accessibility] [--depth <n>]",
             "ui node": "Usage: loupe ui node <snapshot.json> (--test-id <id> | --text <text> | --role <role> | --ref <ref>) [--include-hidden] [--fields node,parent,children,siblings]",
-            "ui set": "Usage: loupe ui set (--test-id <id> | --ref <ref> | --role <role> | --text <text>) <property> <value> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]",
+            "ui query": "Usage: loupe ui query [snapshot.json] (--test-id <id> | --text <text> | --exact-text <text> | --role <role> | --ref <ref>) [--host <url>] [--udid <sim>] [--bundle-id <id>] [--tree view|accessibility] [--include-hidden] [--max-results <n>] [--timeout <seconds>]",
+            "ui set": "Usage: loupe ui set (--test-id <id> | --ref <ref> | --role <role> | --text <text>) <property> <value> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--snapshot <snapshot.json>] [--include-hidden] [--output <path>]",
             "act": "Usage: loupe act <subcommand>",
-            "act tap": "Usage: loupe act tap (--test-id <id> | --ref <ref> | --x <n> --y <n>) --udid <sim> [--host <url>] [--snapshot <snapshot.json>] [--trace-dir <path>] [--expect-visible <testID>]",
-            "act press": "Usage: loupe act press up|down|left|right|select|menu|playPause --udid <sim> [--host <url>] [--trace-dir <path>] [--expect-visible <testID>]",
-            "act wait": "Usage: loupe act wait visible|gone|value <selector> [--host <url>] [--udid <sim>] [--bundle-id <id>] [--timeout <seconds>]",
+            "act tap": "Usage: loupe act tap (--test-id <id> | --ref <view-or-ax-ref> | --x <n> --y <n>) [--udid <sim>] [--host <url>] [--backend native|runtime|auto] [--snapshot <snapshot.json>] [--trace-dir <path>] [--expect-visible <testID>] [--timeout <seconds>]",
+            "act swipe": "Usage: loupe act swipe --from x,y --to x,y [--udid <sim>] [--host <url>] [--duration <seconds>] [--no-verify-scroll] [--trace-dir <path>] [--timeout <seconds>]",
+            "act drag": "Usage: loupe act drag --from x,y --to x,y [--udid <sim>] [--host <url>] [--duration <seconds>] [--trace-dir <path>] [--timeout <seconds>]",
+            "act type": "Usage: loupe act type <text> [--udid <sim>] [--host <url>] [--trace-dir <path>] [--timeout <seconds>]",
+            "act press": "Usage: loupe act press up|down|left|right|select|menu|playPause [--udid <sim>] [--host <url>] [--trace-dir <path>] [--expect-visible <testID>] [--timeout <seconds>]",
+            "act wait": "Usage: loupe act wait visible|gone (--test-id <id> | --ref <ref> | --text <text> | --role <role>) [--host <url>] [--udid <sim>] [--bundle-id <id>] [--timeout <seconds>] [--output <path>]",
             "debug": "Usage: loupe debug <subcommand>",
             "debug logs": "Usage: loupe debug logs [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]",
             "debug network": "Usage: loupe debug network [--host <url>] [--udid <sim>] [--bundle-id <id>] [--output <path>]",
@@ -80,15 +84,24 @@ import Testing
         }
     }
 
-    @Test func launchAndScrollHelpIncludePlatformNeutralWording() throws {
+    @Test func launchScrollAndWaitHelpIncludeSpecificWording() throws {
         let launch = try #require(LoupeCLI.commandUsage("app launch"))
         let scroll = try #require(LoupeCLI.commandUsage("debug scroll"))
+        let wait = try #require(LoupeCLI.commandUsage("act wait"))
 
         #expect(launch.contains("bundle-id"))
         #expect(!launch.contains("iOS Simulator app"))
+        #expect(launch.contains("<sim|device|udid>"))
+        #expect(launch.contains("LOUPE_INJECTOR_PATH"))
+        #expect(launch.contains("Homebrew injector"))
+        #expect(launch.contains("loupe injector-path"))
         #expect(scroll.contains("--from x,y --to x,y --udid <sim>"))
         #expect(scroll.contains("--delta dx,dy|--to-offset x,y"))
         #expect(scroll.contains("[--bundle-id <id>]"))
+        #expect(wait.contains("loupe act wait value"))
+        #expect(wait.contains("--key <path> --equals <value>"))
+        #expect(wait.contains("[--interval <seconds>]"))
+        #expect(wait.contains("[--output <path>]"))
     }
 
     @Test func publicCommandHelpIsAvailableForGroupedCommands() {

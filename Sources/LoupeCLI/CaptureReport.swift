@@ -16,7 +16,7 @@ struct CaptureReport: Codable, Equatable {
 }
 
 struct CaptureReportArtifacts: Codable, Equatable {
-    var screenshot: String
+    var screenshot: String?
     var snapshot: String
     var screenMap: String
     var accessibility: String

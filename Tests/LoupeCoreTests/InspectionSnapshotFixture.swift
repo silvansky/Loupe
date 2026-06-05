@@ -141,4 +141,61 @@ enum InspectionSnapshotFixture {
             ]
         )
     }
+
+    static func makeSnapshotWithOffscreenNode() -> LoupeSnapshot {
+        var snapshot = makeSnapshot()
+        var root = snapshot.nodes["root"]!
+        root.children.append("offscreen")
+        snapshot.nodes["root"] = root
+        snapshot.nodes["offscreen"] = LoupeNode(
+            ref: "offscreen",
+            parentRef: "root",
+            kind: .view,
+            typeName: "UILabel",
+            role: "staticText",
+            testID: "components.offscreen",
+            text: "Offscreen detail",
+            frame: LoupeRect(x: 20, y: 900, width: 180, height: 44),
+            isVisible: true,
+            isEnabled: true,
+            isInteractive: false
+        )
+        return snapshot
+    }
+
+    static func makeSnapshotWithFocusedSearchField() -> LoupeSnapshot {
+        var snapshot = makeSnapshot()
+        var root = snapshot.nodes["root"]!
+        root.children.append("search")
+        snapshot.nodes["root"] = root
+        snapshot.nodes["search"] = LoupeNode(
+            ref: "search",
+            parentRef: "root",
+            kind: .view,
+            typeName: "UISearchBarTextField",
+            role: "textField",
+            placeholder: "Search",
+            text: "Invoice",
+            frame: LoupeRect(x: 33, y: 803, width: 276, height: 38),
+            isVisible: false,
+            isEnabled: true,
+            isInteractive: true,
+            uiKit: LoupeUIKitProperties(
+                className: "UISearchBarTextField",
+                tag: 0,
+                alpha: 1,
+                isHidden: false,
+                isOpaque: false,
+                clipsToBounds: true,
+                userInteractionEnabled: true,
+                isFirstResponder: true,
+                textField: LoupeUITextFieldProperties(
+                    textAlignment: "left",
+                    borderStyle: "none",
+                    isSecureTextEntry: false
+                )
+            )
+        )
+        return snapshot
+    }
 }
