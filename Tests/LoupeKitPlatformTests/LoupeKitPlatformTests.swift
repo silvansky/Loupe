@@ -262,6 +262,30 @@ import SwiftUI
 // owns its LoupeRuntime instance.
 @Suite(.serialized) struct LoupeAgentAppKitTests {
     @MainActor
+    @Test func loupeKitSwiftUIProbeBackingViewAppearsInSnapshotWithMetadata() throws {
+        let runtime = LoupeRuntime()
+        let fixture = LoupeKitSwiftUIProbeBackingViewFixture()
+        defer { fixture.tearDown() }
+
+        let agent = LoupeAgent(runtime: runtime)
+        let snapshot = agent.captureSnapshot()
+        let probe = try #require(snapshot.nodes.values.first { $0.testID == fixture.probeTestID })
+
+        #expect(probe.uiKit?.className == "NSView")
+        #expect(probe.custom["loupe.probe"] == .bool(true))
+        let frame = try #require(probe.frame)
+        #expect(frame.width > 100)
+        #expect(frame.height > 80)
+
+        let accessibilityTree = agent.captureAccessibilityTree()
+        let match = try #require(LoupeAccessibilityTreeQuery.first(.testID(fixture.probeTestID), in: accessibilityTree))
+        let accessibilityNode = try #require(accessibilityTree.nodes[match.ref])
+
+        #expect(accessibilityNode.label == "Imported LoupeKit SwiftUI probe")
+        #expect(accessibilityNode.sourceRef == probe.ref)
+    }
+
+    @MainActor
     @Test func appKitSnapshotCapturesWindowTestIDMetadataAndDiagnostics() throws {
         let runtime = LoupeRuntime()
         let fixture = AppKitFixture()
@@ -415,30 +439,6 @@ import SwiftUI
         #expect(cornerRadiusMutation.effective == .double(8))
         #expect(cornerRadiusMutation.changed == true)
     }
-
-    @MainActor
-    @Test func loupeKitSwiftUIProbeBackingViewAppearsInSnapshotWithMetadata() throws {
-        let runtime = LoupeRuntime()
-        let fixture = LoupeKitSwiftUIProbeBackingViewFixture()
-        defer { fixture.tearDown() }
-
-        let agent = LoupeAgent(runtime: runtime)
-        let snapshot = agent.captureSnapshot()
-        let probe = try #require(snapshot.nodes.values.first { $0.testID == fixture.probeTestID })
-
-        #expect(probe.uiKit?.className == "NSView")
-        #expect(probe.custom["loupe.probe"] == .bool(true))
-        let frame = try #require(probe.frame)
-        #expect(frame.width > 100)
-        #expect(frame.height > 80)
-
-        let accessibilityTree = agent.captureAccessibilityTree()
-        let match = try #require(LoupeAccessibilityTreeQuery.first(.testID(fixture.probeTestID), in: accessibilityTree))
-        let accessibilityNode = try #require(accessibilityTree.nodes[match.ref])
-
-        #expect(accessibilityNode.label == "Imported LoupeKit SwiftUI probe")
-        #expect(accessibilityNode.sourceRef == probe.ref)
-    }
 }
 
 @MainActor
@@ -544,6 +544,8 @@ private final class AppKitFixture {
     }
 
     func tearDown() {
+        nativeAXHost.tearDownAccessibilityElement()
+        window.contentView = nil
         window.orderOut(nil)
         window.close()
     }
@@ -584,6 +586,7 @@ private final class LoupeKitSwiftUIProbeBackingViewFixture {
     }
 
     func tearDown() {
+        window.contentView = nil
         window.orderOut(nil)
         window.close()
     }
@@ -649,6 +652,11 @@ private final class NativeAccessibilityHostView: NSView {
         let frameInScreen = window.convertToScreen(frameInWindow)
         actionElement.setAccessibilityFrame(frameInScreen)
         actionElement.setAccessibilityActivationPoint(NSPoint(x: frameInScreen.midX, y: frameInScreen.midY))
+    }
+
+    func tearDownAccessibilityElement() {
+        actionElement.setAccessibilityParent(nil)
+        actionElement.setAccessibilityElement(false)
     }
 }
 
