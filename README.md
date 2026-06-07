@@ -29,6 +29,16 @@ Why use Loupe:
 
 </details>
 
+## Supported Platforms
+
+| Platform | Runtime |
+| --- | --- |
+| iOS | Simulator, physical device debug builds |
+| macOS | App runtime |
+| tvOS | Simulator |
+| watchOS | Simulator |
+| visionOS | Simulator |
+
 ## Install
 
 ```bash
@@ -41,16 +51,6 @@ Install the agent skill:
 ```bash
 loupe skills install
 ```
-
-## Supported Platforms
-
-| Platform | Runtime |
-| --- | --- |
-| iOS | Simulator, physical device debug builds |
-| macOS | App runtime |
-| tvOS | Simulator |
-| watchOS | Simulator |
-| visionOS | Simulator |
 
 ## Quick Start
 
