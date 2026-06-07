@@ -11,14 +11,32 @@ concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  LOUPE_SIMCTL_LIST_TIMEOUT: "90"
+  LOUPE_SIMCTL_TERMINATE_TIMEOUT: "20"
+
 jobs:
-  post-change-e2e:
-    name: Post-change E2E
+  swiftpm-tests:
+    name: SwiftPM Tests
     runs-on: macos-26
-    timeout-minutes: 90
-    env:
-      LOUPE_SIMCTL_LIST_TIMEOUT: "90"
-      LOUPE_SIMCTL_TERMINATE_TIMEOUT: "20"
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run SwiftPM tests
+        run: swift test
+
+  release-and-platform-builds:
+    name: Release and Platform Builds
+    runs-on: macos-26
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -30,14 +48,220 @@ jobs:
           xcodebuild -version
           perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
 
-      - name: Run post-change harness
-        run: scripts/verify-agent-work.sh
+      - name: Release CLI build
+        run: swift build --configuration release --disable-sandbox --product loupe
 
-      - name: Upload Loupe diagnostics
+      - name: Platform builds
+        run: scripts/verify-platform-builds.sh
+
+      - name: Upload build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: loupe-diagnostics
+          name: loupe-build-diagnostics
           if-no-files-found: ignore
           path: |
             /tmp/loupe-*
+
+  macos-e2e:
+    name: macOS E2E
+    runs-on: macos-26
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run macOS example E2E
+        run: Examples/MacLoupeExample/run-macos-e2e.sh
+
+      - name: Upload macOS diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-macos-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-macos-*
+
+  tvos-e2e:
+    name: tvOS E2E
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
+
+      - name: Run tvOS example E2E
+        run: Examples/LoupeTVExample/run-tvos-runtime-e2e.sh
+
+      - name: Upload tvOS diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-tvos-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-tvos-*
+
+  watchos-e2e:
+    name: watchOS E2E
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
+
+      - name: Run watchOS example E2E
+        run: Examples/LoupeWatchExample/run-watchos-runtime-e2e.sh
+
+      - name: Upload watchOS diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-watchos-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-watchos-*
+
+  ios-injected-e2e:
+    name: iOS Injected E2E
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      LOUPE_LAUNCH_TIMEOUT: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
+
+      - name: Run injected log E2E
+        run: Examples/LoupeExample/run-injected.sh
+
+      - name: Upload iOS injected diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-ios-injected-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-example-*
+            /tmp/loupe-injector-build.log
+
+  ios-runtime-e2e:
+    name: iOS Runtime E2E
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      LOUPE_LAUNCH_TIMEOUT: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
+
+      - name: Run runtime E2E
+        run: Examples/LoupeExample/run-runtime-e2e.sh
+
+      - name: Upload iOS runtime diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-ios-runtime-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-runtime-*
+            /tmp/loupe-example-build.log
+            /tmp/loupe-injector-build.log
+
+  ios-native-e2e:
+    name: iOS Native Scenario E2E
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      LOUPE_LAUNCH_TIMEOUT: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
+
+      - name: Run native scenario E2E
+        run: Examples/LoupeExample/run-native-scenarios.sh
+
+      - name: Upload iOS native diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-ios-native-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-native-*
+            /tmp/loupe-example-build.log
+            /tmp/loupe-injector-build.log
+
+  ios-bookmark-e2e:
+    name: iOS Bookmark E2E
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      LOUPE_LAUNCH_TIMEOUT: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          perl -e 'alarm 90; exec @ARGV' xcrun simctl list devices available
+
+      - name: Run bookmark E2E
+        run: Examples/LoupeExample/run-bookmark-e2e.sh
+
+      - name: Upload iOS bookmark diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loupe-ios-bookmark-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/loupe-bookmark-*
+            /tmp/loupe-example-build.log
+            /tmp/loupe-injector-build.log

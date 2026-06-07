@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT="${LOUPE_BOOKMARK_PORT:-${LOUPE_PORT:-}}"
+LAUNCH_TIMEOUT="${LOUPE_LAUNCH_TIMEOUT:-30}"
 
 cd "$ROOT_DIR"
 source Examples/LoupeExample/build-simulator-artifacts.sh
@@ -94,6 +95,7 @@ LAUNCH_ARGUMENTS=(
   --device "$DEVICE"
   --bundle-id dev.loupe.example
   --inject
+  --timeout "$LAUNCH_TIMEOUT"
   --env LOUPE_EXAMPLE_ROUTE=bookmarks
 )
 if [[ -n "$PORT" ]]; then
