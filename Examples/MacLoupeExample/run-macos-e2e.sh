@@ -7,7 +7,8 @@ HOST="http://127.0.0.1:${PORT}"
 
 cd "$ROOT_DIR"
 
-swift build --product loupe --product LoupeInjector
+swift build --product loupe
+swift build --product LoupeInjector
 xcodebuild \
   -project Examples/MacLoupeExample/MacLoupeExample.xcodeproj \
   -scheme MacLoupeExample \
