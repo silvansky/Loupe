@@ -11,12 +11,7 @@ run_step() {
   "$@"
 }
 
-SWIFT_TEST_ARGS=(test)
-if [[ "${LOUPE_VERIFY_VERBOSE:-}" == "1" ]]; then
-  SWIFT_TEST_ARGS+=(--very-verbose)
-fi
-
-run_step "swift test" swift "${SWIFT_TEST_ARGS[@]}"
+run_step "swift test" swift test
 run_step "release CLI build" swift build --configuration release --disable-sandbox --product loupe
 run_step "platform builds" scripts/verify-platform-builds.sh
 run_step "macOS example E2E" Examples/MacLoupeExample/run-macos-e2e.sh

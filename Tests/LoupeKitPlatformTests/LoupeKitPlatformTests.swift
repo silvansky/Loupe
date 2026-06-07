@@ -257,7 +257,10 @@ import SwiftUI
 #endif
 
 #if canImport(AppKit) && !canImport(UIKit)
-@Suite struct LoupeAgentAppKitTests {
+// These tests create real NSWindow instances and exercise AppKit's global
+// application/accessibility state. Keep them serialized even though each test
+// owns its LoupeRuntime instance.
+@Suite(.serialized) struct LoupeAgentAppKitTests {
     @MainActor
     @Test func appKitSnapshotCapturesWindowTestIDMetadataAndDiagnostics() throws {
         let runtime = LoupeRuntime()

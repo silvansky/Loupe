@@ -17,7 +17,6 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
     env:
-      LOUPE_VERIFY_VERBOSE: "1"
       LOUPE_SIMCTL_LIST_TIMEOUT: "90"
       LOUPE_SIMCTL_TERMINATE_TIMEOUT: "20"
 
