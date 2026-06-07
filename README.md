@@ -12,11 +12,12 @@ probes.
 
 Why use Loupe:
 
-- **Better UI checks** with screenshots, view trees, accessibility, traces, and
-  runtime state.
-- **Fewer blind rebuilds** by trying small UI adjustments before source edits.
-- **Smaller agent context** by keeping full snapshots on disk and sending
-  focused observations instead.
+- **Better UI checks** with view/accessibility trees, view properties, app
+  state, traces, and screenshots.
+- **Shorter rebuild loop** by probing small UI changes before choosing a source
+  edit.
+- **Agent-sized context** by keeping full snapshots on disk and sending compact
+  observations, refs, and focused nodes.
 
 ## Demo
 
