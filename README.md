@@ -44,13 +44,13 @@ loupe skills install
 
 ## Supported Platforms
 
-Loupe is built around the iOS Simulator workflow. It also has checked support
-for macOS, tvOS Simulator, watchOS Simulator, visionOS Simulator builds, and
-debug-only physical iOS device runtimes.
-
-Simulator apps can use `--inject` without adding Loupe to the app. Physical
-iOS devices need a debug-only `LoupeInjector` dependency. Do not include Loupe
-in App Store release builds.
+| Platform | Runtime |
+| --- | --- |
+| iOS | Simulator, physical device debug builds |
+| macOS | App runtime |
+| tvOS | Simulator |
+| watchOS | Simulator |
+| visionOS | Simulator |
 
 ## Quick Start
 
