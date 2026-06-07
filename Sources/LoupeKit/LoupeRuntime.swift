@@ -14,7 +14,7 @@ public final class LoupeRuntime {
     private var probesByID: [String: LoupeRegisteredProbe] = [:]
     private var didInstallBridge = false
 
-    private init() {
+    init() {
         let environment = ProcessInfo.processInfo.environment
         let simulatorUDID = environment["SIMULATOR_UDID"]
         identity = LoupeRuntimeIdentity(
@@ -26,6 +26,10 @@ public final class LoupeRuntime {
             simulatorUDID: simulatorUDID,
             simulatorName: environment["SIMULATOR_DEVICE_NAME"]
         )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     public func activateBridge() {

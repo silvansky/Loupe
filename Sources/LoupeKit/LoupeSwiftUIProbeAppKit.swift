@@ -19,18 +19,23 @@ private struct LoupeSwiftUIProbeRepresentable: NSViewRepresentable {
     var label: String?
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        view.testID(id)
-        view.testProperty("loupe.probe", true)
-        view.setAccessibilityElement(true)
-        view.setAccessibilityLabel(label ?? id)
-        view.setAccessibilityRole(.group)
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.clear.cgColor
-        return view
+        LoupeAppKitSwiftUIProbeBackingView.make(id: id, label: label)
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+        LoupeAppKitSwiftUIProbeBackingView.update(nsView, id: id, label: label)
+    }
+}
+
+@MainActor
+enum LoupeAppKitSwiftUIProbeBackingView {
+    static func make(id: String, label: String?) -> NSView {
+        let view = NSView()
+        update(view, id: id, label: label)
+        return view
+    }
+
+    static func update(_ nsView: NSView, id: String, label: String?) {
         nsView.testID(id)
         nsView.testProperty("loupe.probe", true)
         nsView.setAccessibilityElement(true)

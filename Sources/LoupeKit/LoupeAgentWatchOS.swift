@@ -6,12 +6,20 @@ import WatchKit
 
 @MainActor
 public final class LoupeAgent {
-    public init() {}
+    private let runtime: LoupeRuntime
+
+    public init() {
+        runtime = .shared
+    }
+
+    init(runtime: LoupeRuntime) {
+        self.runtime = runtime
+    }
 
     public func captureSnapshot() -> LoupeSnapshot {
         let appRef = "n0"
         var nodes: [String: LoupeNode] = [:]
-        let probes = LoupeRuntime.shared.registeredProbes()
+        let probes = runtime.registeredProbes()
         let screen = currentWatchScreen()
         let probeRefs = probes.indices.map { "n\($0 + 1)" }
         let parentRefs = probeParentRefs(probes: probes, refs: probeRefs, appRef: appRef)
@@ -38,7 +46,7 @@ public final class LoupeAgent {
                     activationPoint: probe.frame?.center,
                     isElement: true
                 ),
-                custom: mergedMetadata(probe.metadata, with: LoupeRuntime.shared.metadata(forTestID: probe.id))
+                custom: mergedMetadata(probe.metadata, with: runtime.metadata(forTestID: probe.id))
             )
         }
 

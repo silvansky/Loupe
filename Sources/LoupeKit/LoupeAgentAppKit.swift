@@ -47,10 +47,17 @@ public extension NSView {
 
 @MainActor
 public final class LoupeAgent {
+    private let runtime: LoupeRuntime
     private var nextRef = 0
     private var nextNativeAccessibilityRef = 0
 
-    public init() {}
+    public init() {
+        runtime = .shared
+    }
+
+    init(runtime: LoupeRuntime) {
+        self.runtime = runtime
+    }
 
     public func captureSnapshot() -> LoupeSnapshot {
         captureSnapshotWithViewRefs().snapshot
@@ -205,7 +212,7 @@ public final class LoupeAgent {
         view.superview?.layoutSubtreeIfNeeded()
         let elapsed = Date().timeIntervalSince(startedAt)
 
-        LoupeRuntime.shared.log(
+        runtime.log(
             level: "info",
             "activation_applied",
             metadata: [
@@ -265,7 +272,7 @@ public final class LoupeAgent {
 
         try applyMutation(property: request.property, value: request.value, to: view, layout: request.layout)
 
-        LoupeRuntime.shared.log(
+        runtime.log(
             level: "info",
             "mutation_applied",
             metadata: [
@@ -366,13 +373,13 @@ public final class LoupeAgent {
         let windowRefs = NSApp.windows.compactMap { window -> String? in
             captureWindow(window, parentRef: appRef, nodes: &nodes, viewRefs: &viewRefs, viewsByRef: &viewsByRef)
         }
-        let registeredProbeRefs = LoupeRuntime.shared.registeredProbes().map { probe in
+        let registeredProbeRefs = runtime.registeredProbes().map { probe in
             let ref = makeRef()
             nodes[ref] = loupeRegisteredProbeNode(
                 probe,
                 ref: ref,
                 parentRef: appRef,
-                runtimeMetadata: LoupeRuntime.shared.metadata(forTestID: probe.id)
+                runtimeMetadata: runtime.metadata(forTestID: probe.id)
             )
             return ref
         }
@@ -648,7 +655,7 @@ public final class LoupeAgent {
             captureView($0, parentRef: ref, window: window, nodes: &nodes, viewRefs: &viewRefs, viewsByRef: &viewsByRef)
         }
         let testID = nonEmpty(view.identifier?.rawValue) ?? stringMetadata("id", from: view.loupeMetadata)
-        let customMetadata = mergedMetadata(view.loupeMetadata, with: LoupeRuntime.shared.metadata(forTestID: testID))
+        let customMetadata = mergedMetadata(view.loupeMetadata, with: runtime.metadata(forTestID: testID))
 
         nodes[ref] = LoupeNode(
             ref: ref,

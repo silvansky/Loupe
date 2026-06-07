@@ -11,10 +11,17 @@ import WebKit
 public final class LoupeAgent {
     fileprivate static var mutatedConstraints: [String: NSLayoutConstraint] = [:]
 
+    private let runtime: LoupeRuntime
     private var nextRef = 0
     private var nextNativeAccessibilityRef = 0
 
-    public init() {}
+    public init() {
+        runtime = .shared
+    }
+
+    init(runtime: LoupeRuntime) {
+        self.runtime = runtime
+    }
 
     public func captureSnapshot() -> LoupeSnapshot {
         captureSnapshotWithViewRefs().snapshot
@@ -94,13 +101,13 @@ public final class LoupeAgent {
             sceneRefs.append(sceneRef)
         }
 
-        let registeredProbeRefs = LoupeRuntime.shared.registeredProbes().map { probe in
+        let registeredProbeRefs = runtime.registeredProbes().map { probe in
             let ref = makeRef()
             nodes[ref] = loupeRegisteredProbeNode(
                 probe,
                 ref: ref,
                 parentRef: appRef,
-                runtimeMetadata: LoupeRuntime.shared.metadata(forTestID: probe.id)
+                runtimeMetadata: runtime.metadata(forTestID: probe.id)
             )
             return ref
         }
@@ -293,7 +300,7 @@ public final class LoupeAgent {
         )
 
         let testID = view.accessibilityIdentifier ?? stringMetadata("id", from: view.loupeMetadata)
-        let customMetadata = mergedMetadata(view.loupeMetadata, with: LoupeRuntime.shared.metadata(forTestID: testID))
+        let customMetadata = mergedMetadata(view.loupeMetadata, with: runtime.metadata(forTestID: testID))
         let accessibility = accessibility(for: view)
 
         nodes[ref] = LoupeNode(

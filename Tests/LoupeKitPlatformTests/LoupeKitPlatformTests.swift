@@ -12,7 +12,7 @@ import SwiftUI
 @Suite struct LoupeRuntimeBridgeTests {
     @MainActor
     @Test func runtimeLogBridgeKeepsMostRecentFiveHundredEntries() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
         runtime.activateBridge()
 
         for index in 0...500 {
@@ -40,7 +40,7 @@ import SwiftUI
 
     @MainActor
     @Test func runtimeReferenceBridgeRecordsAppAuthoredEvidence() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
         runtime.activateBridge()
 
         NotificationCenter.default.post(
@@ -66,13 +66,11 @@ import SwiftUI
 
     @MainActor
     @Test func runtimeRegisteredProbesKeepFrameAndMetadataForProbeSnapshots() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
         let id = "platform.registered.probe"
-        runtime.unregisterProbe(id: id)
-        defer { runtime.unregisterProbe(id: id) }
 
-        Loupe.registerProbe(
-            id,
+        runtime.registerProbe(
+            id: id,
             label: "Registered probe",
             role: "button",
             frame: LoupeRect(x: 4, y: 8, width: 44, height: 22),
@@ -92,11 +90,9 @@ import SwiftUI
 
     @MainActor
     @Test func runtimeProbeBridgeRegistersAndRemovesProbeWithoutImportingLoupeAPI() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
         runtime.activateBridge()
         let id = "platform.notification.probe"
-        runtime.unregisterProbe(id: id)
-        defer { runtime.unregisterProbe(id: id) }
 
         NotificationCenter.default.post(
             name: .loupeProbe,
@@ -181,7 +177,7 @@ import SwiftUI
 
     @MainActor
     @Test func runtimeReferenceEvidenceKeepsMostRecentFiveHundredEntries() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
 
         for index in 0...500 {
             runtime.recordReference(
@@ -201,20 +197,21 @@ import SwiftUI
 
     @MainActor
     @Test func runtimeObjectClassesExposeObjectiveCRuntimeMetadata() throws {
-        let classes = LoupeRuntime.shared.runtimeObjectClasses(matching: "NSObject", limit: 20)
+        let runtime = LoupeRuntime()
+        let classes = runtime.runtimeObjectClasses(matching: "NSObject", limit: 20)
 
         #expect(classes.evidenceKind == "objc-runtime-class-list")
         #expect(classes.totalCount >= classes.returnedCount)
         #expect(classes.classes.contains { $0.name == "NSObject" })
 
-        let description = try LoupeRuntime.shared.runtimeObjectDescription(className: "NSObject")
+        let description = try runtime.runtimeObjectDescription(className: "NSObject")
         #expect(description.evidenceKind == "objc-runtime-class-description")
         #expect(description.name == "NSObject")
     }
 
     @MainActor
     @Test func lifetimeProbesTrackAliveAndReleasedObjects() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
         let aliveObject = NSObject()
         let aliveID = runtime.watchLifetime(aliveObject, name: "alive fixture")
 
@@ -235,7 +232,7 @@ import SwiftUI
 
     @MainActor
     @Test func lifetimeProbeBridgeRecordsObjectWithoutImportingLoupeAPI() {
-        let runtime = LoupeRuntime.shared
+        let runtime = LoupeRuntime()
         runtime.activateBridge()
         let object = NSObject()
 
@@ -260,13 +257,14 @@ import SwiftUI
 #endif
 
 #if canImport(AppKit) && !canImport(UIKit)
-@Suite(.serialized) struct LoupeAgentAppKitTests {
+@Suite struct LoupeAgentAppKitTests {
     @MainActor
     @Test func appKitSnapshotCapturesWindowTestIDMetadataAndDiagnostics() throws {
+        let runtime = LoupeRuntime()
         let fixture = AppKitFixture()
         defer { fixture.tearDown() }
 
-        LoupeRuntime.shared.activateBridge()
+        runtime.activateBridge()
         NotificationCenter.default.post(
             name: .loupeViewMetadata,
             object: nil,
@@ -279,7 +277,7 @@ import SwiftUI
             ]
         )
 
-        let agent = LoupeAgent()
+        let agent = LoupeAgent(runtime: runtime)
         let snapshot = agent.captureSnapshot()
         let appNode = try #require(snapshot.rootRefs.compactMap { snapshot.nodes[$0] }.first)
         let windowNode = try #require(snapshot.nodes.values.first { $0.testID == fixture.windowTestID })
@@ -416,11 +414,12 @@ import SwiftUI
     }
 
     @MainActor
-    @Test func importedLoupeKitSwiftUIProbeAppearsInSnapshotWithMetadata() throws {
-        let fixture = ImportedLoupeSwiftUIProbeFixture()
+    @Test func loupeKitSwiftUIProbeBackingViewAppearsInSnapshotWithMetadata() throws {
+        let runtime = LoupeRuntime()
+        let fixture = LoupeKitSwiftUIProbeBackingViewFixture()
         defer { fixture.tearDown() }
 
-        let agent = LoupeAgent()
+        let agent = LoupeAgent(runtime: runtime)
         let snapshot = agent.captureSnapshot()
         let probe = try #require(snapshot.nodes.values.first { $0.testID == fixture.probeTestID })
 
@@ -548,7 +547,7 @@ private final class AppKitFixture {
 }
 
 @MainActor
-private final class ImportedLoupeSwiftUIProbeFixture {
+private final class LoupeKitSwiftUIProbeBackingViewFixture {
     let probeTestID = "platform.importedSwiftUI.probe"
 
     private let window: NSWindow
@@ -565,13 +564,20 @@ private final class ImportedLoupeSwiftUIProbeFixture {
         window.identifier = NSUserInterfaceItemIdentifier("platform.importedSwiftUI.window")
         window.title = "Imported SwiftUI Probe"
 
-        let host = NSHostingView(rootView: ImportedLoupeSwiftUIProbeView(probeTestID: probeTestID))
-        host.frame = NSRect(x: 0, y: 0, width: 280, height: 160)
-        host.identifier = NSUserInterfaceItemIdentifier("platform.importedSwiftUI.host")
-        window.contentView = host
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 160))
+        contentView.identifier = NSUserInterfaceItemIdentifier("platform.importedSwiftUI.content")
+
+        let probe = LoupeAppKitSwiftUIProbeBackingView.make(
+            id: probeTestID,
+            label: "Imported LoupeKit SwiftUI probe"
+        )
+        probe.frame = NSRect(x: 20, y: 20, width: 240, height: 120)
+        contentView.addSubview(probe)
+
+        window.contentView = contentView
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
-        host.layoutSubtreeIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
     }
 
     func tearDown() {
