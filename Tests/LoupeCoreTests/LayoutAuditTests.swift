@@ -585,9 +585,21 @@ struct LayoutAuditTests {
                     isVisible: true,
                     isEnabled: true,
                     isInteractive: false,
-                    children: ["tab-button", "synthetic-tab-item", "app-button"]
+                    children: ["tabbar", "synthetic-tab-item", "app-button"]
                 ),
-                "tab-button": tabBarButton(ref: "tab-button"),
+                "tabbar": LoupeNode(
+                    ref: "tabbar",
+                    parentRef: "root",
+                    kind: .view,
+                    typeName: "UITabBar",
+                    role: "tabBar",
+                    frame: LoupeRect(x: 0, y: 996, width: 1920, height: 84),
+                    isVisible: true,
+                    isEnabled: true,
+                    isInteractive: true,
+                    children: ["tab-button"]
+                ),
+                "tab-button": tabBarButton(ref: "tab-button", parentRef: "tabbar"),
                 "synthetic-tab-item": tabBarButton(
                     ref: "synthetic-tab-item",
                     typeName: "UITabBarItem",
@@ -1192,6 +1204,7 @@ struct LayoutAuditTests {
 
     private func tabBarButton(
         ref: String,
+        parentRef: String = "root",
         typeName: String = "UITabBarButton",
         role: String? = nil,
         text: String? = nil,
@@ -1200,7 +1213,7 @@ struct LayoutAuditTests {
     ) -> LoupeNode {
         LoupeNode(
             ref: ref,
-            parentRef: "root",
+            parentRef: parentRef,
             kind: .view,
             typeName: typeName,
             role: role,

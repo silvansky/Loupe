@@ -82,6 +82,121 @@ struct SurfaceVisibilityTests {
         #expect(waitLikeResult?.isVisible == true)
     }
 
+    @Test func exactIdentityContainersWithVisibleDescendantsAreDiscoverable() {
+        let snapshot = LoupeSnapshot(
+            id: "scroll-container-identity",
+            capturedAt: Date(timeIntervalSince1970: 0),
+            screen: LoupeScreen(size: LoupeSize(width: 390, height: 844), scale: 3),
+            rootRefs: ["app"],
+            nodes: [
+                "app": Self.node(
+                    ref: "app",
+                    kind: .application,
+                    typeName: "UIApplication",
+                    role: "application",
+                    frame: LoupeRect(x: 0, y: 0, width: 390, height: 844),
+                    children: ["table"]
+                ),
+                "table": Self.node(
+                    ref: "table",
+                    parentRef: "app",
+                    testID: "example.customerList",
+                    typeName: "UITableView",
+                    role: "tableView",
+                    frame: LoupeRect(x: 0, y: 0, width: 390, height: 844),
+                    isInteractive: true,
+                    uiKit: Self.uiKitScrollView(),
+                    children: ["row"]
+                ),
+                "row": Self.node(
+                    ref: "row",
+                    parentRef: "table",
+                    testID: "example.customer.1",
+                    typeName: "UITableViewCell",
+                    role: "cell",
+                    text: "Customer 1",
+                    frame: LoupeRect(x: 16, y: 120, width: 180, height: 44),
+                    backgroundAlpha: 1,
+                    isInteractive: true
+                ),
+            ]
+        )
+
+        let testIDResults = LoupeSnapshotQuery.find(.testID("example.customerList"), in: snapshot)
+        #expect(testIDResults.map(\.ref) == ["table"])
+        #expect(testIDResults.first?.isVisible == true)
+
+        let refResults = LoupeSnapshotQuery.find(.ref("table"), in: snapshot)
+        #expect(refResults.map(\.ref) == ["table"])
+    }
+
+    @Test func aggregateSemanticContainersDoNotOccludeAccessibleProbeContent() {
+        let probeFrame = LoupeRect(x: 0, y: 153, width: 390, height: 608)
+        let snapshot = LoupeSnapshot(
+            id: "aggregate-semantic-container",
+            capturedAt: Date(timeIntervalSince1970: 0),
+            screen: LoupeScreen(size: LoupeSize(width: 390, height: 844), scale: 3),
+            rootRefs: ["app"],
+            nodes: [
+                "app": Self.node(
+                    ref: "app",
+                    kind: .application,
+                    typeName: "UIApplication",
+                    role: "application",
+                    frame: LoupeRect(x: 0, y: 0, width: 390, height: 844),
+                    children: ["content", "tabContainer"]
+                ),
+                "content": Self.node(
+                    ref: "content",
+                    parentRef: "app",
+                    typeName: "UIView",
+                    frame: LoupeRect(x: 0, y: 0, width: 390, height: 844),
+                    children: ["probe"]
+                ),
+                "probe": Self.node(
+                    ref: "probe",
+                    parentRef: "content",
+                    testID: "example.fixtures.swiftui.probe",
+                    typeName: "UIView",
+                    semanticText: "iOS SwiftUI probe",
+                    frame: probeFrame,
+                    accessibility: LoupeAccessibility(
+                        identifier: "example.fixtures.swiftui.probe",
+                        label: "iOS SwiftUI probe",
+                        frame: probeFrame,
+                        isElement: true
+                    )
+                ),
+                "tabContainer": Self.node(
+                    ref: "tabContainer",
+                    parentRef: "app",
+                    typeName: "UIView",
+                    semanticText: "SwiftUI Web Keyboard Nested SwiftUI Web Keyboard Nested",
+                    frame: LoupeRect(x: 0, y: 0, width: 390, height: 844),
+                    children: ["tabBar"]
+                ),
+                "tabBar": Self.node(
+                    ref: "tabBar",
+                    parentRef: "tabContainer",
+                    typeName: "UITabBar",
+                    role: "tabBar",
+                    semanticText: "SwiftUI Web Keyboard Nested",
+                    frame: LoupeRect(x: 0, y: 761, width: 390, height: 83),
+                    backgroundAlpha: 1
+                ),
+            ]
+        )
+
+        #expect(LoupeSurfaceVisibility.visibleNodeRefs(in: snapshot, includesOffscreen: true).contains("probe"))
+
+        let accessibilityTree = LoupeAccessibilityTree.build(from: snapshot)
+        let probeNode = accessibilityTree.nodes.values.first {
+            $0.testID == "example.fixtures.swiftui.probe"
+        }
+        #expect(probeNode?.label == "iOS SwiftUI probe")
+        #expect(probeNode?.sourceRef == "probe")
+    }
+
     @Test func overlappingSyntheticProbesDoNotOccludeChildProbeTargets() {
         let snapshot = LoupeSnapshot(
             id: "watch-probe-overlap",
@@ -448,6 +563,27 @@ struct SurfaceVisibilityTests {
                 textAlignment: "left",
                 borderStyle: "none",
                 isSecureTextEntry: false
+            )
+        )
+    }
+
+    private static func uiKitScrollView() -> LoupeUIKitProperties {
+        LoupeUIKitProperties(
+            className: "UITableView",
+            tag: 0,
+            alpha: 1,
+            isHidden: false,
+            isOpaque: true,
+            clipsToBounds: true,
+            userInteractionEnabled: true,
+            isFirstResponder: false,
+            scrollView: LoupeUIScrollViewProperties(
+                contentOffset: LoupePoint(x: 0, y: 0),
+                contentSize: LoupeSize(width: 390, height: 1200),
+                adjustedContentInset: LoupeInsets(top: 0, left: 0, bottom: 0, right: 0),
+                isScrollEnabled: true,
+                alwaysBounceVertical: true,
+                alwaysBounceHorizontal: false
             )
         )
     }

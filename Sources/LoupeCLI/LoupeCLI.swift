@@ -3726,8 +3726,17 @@ struct LoupeCLI {
             || node.uiKit?.segmentedControl != nil
             || node.uiKit?.textField != nil
             || node.uiKit?.textView != nil
-            || node.kind == .barButtonItem
-            || node.kind == .tabBarItem
+            || hasSyntheticSource("UIBarButtonItem", node)
+            || hasSyntheticSource("UITabBarItem", node)
+    }
+
+    private static func hasSyntheticSource(_ source: String, _ node: LoupeNode) -> Bool {
+        guard case .bool(true) = node.custom["synthetic"],
+              case let .string(nodeSource) = node.custom["source"],
+              nodeSource == source else {
+            return false
+        }
+        return true
     }
 
     private static func nodeIdentityKey(_ node: LoupeNode, screen: LoupeSize) -> String {

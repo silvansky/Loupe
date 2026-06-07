@@ -220,6 +220,34 @@ package struct ActionOptions: ActionDispatchOptions {
         return url
     }
 
+    private static func expectVisibleSelector(from raw: String) -> LoupeSelector {
+        guard let delimiter = raw.firstIndex(where: { $0 == ":" || $0 == "=" }) else {
+            return .testID(raw)
+        }
+
+        let key = raw[..<delimiter]
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+        let valueStart = raw.index(after: delimiter)
+        let value = String(raw[valueStart...])
+
+        switch key {
+        case "testid", "id":
+            return .testID(value)
+        case "ref":
+            return .ref(value)
+        case "role":
+            return .role(value)
+        case "text", "containstext":
+            return .text(value, exact: false)
+        case "exacttext":
+            return .text(value, exact: true)
+        default:
+            return .testID(raw)
+        }
+    }
+
     private static func pressButton(_ raw: String) throws -> String {
         let normalized = raw
             .replacingOccurrences(of: "-", with: "")

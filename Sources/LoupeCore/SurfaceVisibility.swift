@@ -104,7 +104,7 @@ public enum LoupeSurfaceVisibility {
             return false
         }
 
-        if let text = LoupeObservationCompactor.displayText(for: node), !text.isEmpty {
+        if hasOwnPaintedText(node) {
             return true
         }
         if node.testID != nil,
@@ -122,6 +122,24 @@ public enum LoupeSurfaceVisibility {
             return true
         }
         return false
+    }
+
+    private static func hasOwnPaintedText(_ node: LoupeNode) -> Bool {
+        if [node.text, node.renderedText, node.label, node.value, node.placeholder].contains(where: {
+            $0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }) {
+            return true
+        }
+
+        guard let semanticText = node.semanticText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !semanticText.isEmpty
+        else {
+            return false
+        }
+
+        return node.children.isEmpty
+            || node.accessibility?.isElement == true
+            || node.isInteractive
     }
 
     private static func isSyntheticProbe(_ node: LoupeNode) -> Bool {

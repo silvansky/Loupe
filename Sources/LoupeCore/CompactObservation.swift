@@ -152,16 +152,6 @@ public enum LoupeObservationCompactor {
         let hasKnownScreenSize = snapshot.screen.size.width > 0 && snapshot.screen.size.height > 0
         let surfaceVisibleRefs = LoupeSurfaceVisibility.visibleNodeRefs(in: snapshot)
 
-        let paintOrders = paintOrders(snapshot)
-        let opaqueCoverNodes = snapshot.nodes.values
-            .filter { node in
-                guard let frame = node.frame, frame.intersects(screenRect) else { return false }
-                return isOpaqueCoverNode(node)
-            }
-            .sorted { lhs, rhs in
-                (paintOrders[lhs.ref] ?? 0) > (paintOrders[rhs.ref] ?? 0)
-            }
-
         let visibleNodes = snapshot.nodes.values
             .filter { node in
                 guard surfaceVisibleRefs.contains(node.ref), let frame = node.frame else { return false }
@@ -383,113 +373,6 @@ public enum LoupeObservationCompactor {
             return false
         }
         return visibleArea / screenArea >= 0.08
-    }
-
-    private static func isFullyOccluded(
-        _ node: LoupeNode,
-        in snapshot: LoupeSnapshot,
-        screenRect: LoupeRect,
-        paintOrders: [String: Int],
-        opaqueCoverNodes: [LoupeNode]
-    ) -> Bool {
-        guard let frame = node.frame,
-              let visibleFrame = intersection(frame, screenRect) else {
-            return true
-        }
-        let nodeOrder = paintOrders[node.ref] ?? 0
-        let samples = samplePoints(in: visibleFrame)
-        guard !samples.isEmpty else {
-            return true
-        }
-
-        return samples.allSatisfy { point in
-            opaqueCoverNodes.contains { coverNode in
-                guard coverNode.ref != node.ref else { return false }
-                guard (paintOrders[coverNode.ref] ?? 0) > nodeOrder else { return false }
-                guard !isRelated(coverNode.ref, node.ref, in: snapshot) else { return false }
-                guard let coverFrame = coverNode.frame else { return false }
-                return coverFrame.contains(point)
-            }
-        }
-    }
-
-    private static func isOpaqueCoverNode(_ node: LoupeNode) -> Bool {
-        guard node.kind == .view || node.kind == .window else {
-            return false
-        }
-        guard node.isVisible else {
-            return false
-        }
-        let alpha = node.style?.alpha ?? node.uiKit?.alpha ?? 1
-        guard alpha >= 0.95 else {
-            return false
-        }
-        return (node.style?.backgroundColor?.alpha ?? 0) >= 0.95
-    }
-
-    private static func intersection(_ lhs: LoupeRect, _ rhs: LoupeRect) -> LoupeRect? {
-        guard lhs.intersects(rhs) else {
-            return nil
-        }
-        let x = max(lhs.x, rhs.x)
-        let y = max(lhs.y, rhs.y)
-        let maxX = min(lhs.maxX, rhs.maxX)
-        let maxY = min(lhs.maxY, rhs.maxY)
-        return LoupeRect(x: x, y: y, width: maxX - x, height: maxY - y)
-    }
-
-    private static func samplePoints(in rect: LoupeRect) -> [LoupePoint] {
-        guard !rect.isEmpty else {
-            return []
-        }
-
-        let insetX = min(1, rect.width / 4)
-        let insetY = min(1, rect.height / 4)
-        let minX = rect.x + insetX
-        let maxX = rect.maxX - insetX
-        let minY = rect.y + insetY
-        let maxY = rect.maxY - insetY
-        let midX = rect.x + rect.width / 2
-        let midY = rect.y + rect.height / 2
-        return [
-            LoupePoint(x: midX, y: midY),
-            LoupePoint(x: minX, y: minY),
-            LoupePoint(x: maxX, y: minY),
-            LoupePoint(x: minX, y: maxY),
-            LoupePoint(x: maxX, y: maxY),
-        ]
-    }
-
-    private static func isRelated(_ firstRef: String, _ secondRef: String, in snapshot: LoupeSnapshot) -> Bool {
-        isAncestor(firstRef, of: secondRef, in: snapshot) || isAncestor(secondRef, of: firstRef, in: snapshot)
-    }
-
-    private static func isAncestor(_ possibleAncestorRef: String, of ref: String, in snapshot: LoupeSnapshot) -> Bool {
-        var currentRef = snapshot.nodes[ref]?.parentRef
-        while let ref = currentRef {
-            if ref == possibleAncestorRef {
-                return true
-            }
-            currentRef = snapshot.nodes[ref]?.parentRef
-        }
-        return false
-    }
-
-    private static func paintOrders(_ snapshot: LoupeSnapshot) -> [String: Int] {
-        var order = 0
-        var orders: [String: Int] = [:]
-        func visit(_ ref: String) {
-            guard let node = snapshot.nodes[ref] else { return }
-            orders[ref] = order
-            order += 1
-            for child in node.children {
-                visit(child)
-            }
-        }
-        for root in snapshot.rootRefs {
-            visit(root)
-        }
-        return orders
     }
 
     private static func hasVisibleTextDescendant(

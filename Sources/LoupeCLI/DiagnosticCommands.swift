@@ -663,7 +663,12 @@ extension LoupeCLI {
         let matches = LoupeSnapshotQuery.find(
             selector,
             in: beforeSnapshot,
-            options: LoupeQueryOptions(includeHidden: false, includeDisabled: true, maxResults: 2)
+            options: LoupeQueryOptions(
+                includeHidden: true,
+                includeDisabled: true,
+                maxResults: 2,
+                visibilityMode: .raw
+            )
         )
         guard matches.count == 1, let target = matches.first else {
             throw CLIError("loupe debug scroll expected exactly one scroll target, found \(matches.count)")

@@ -91,26 +91,45 @@ public enum LoupeLayoutAuditor {
         _ snapshot: LoupeSnapshot,
         options: LoupeLayoutAuditOptions = LoupeLayoutAuditOptions()
     ) -> LoupeLayoutAudit {
-        let visibleRefs = LoupeSurfaceVisibility.visibleNodeRefs(in: snapshot)
         var issues: [LoupeLayoutIssue] = []
-        issues.append(contentsOf: duplicateTestIDIssues(in: snapshot, visibleRefs: visibleRefs))
-        issues.append(contentsOf: interactiveIssues(in: snapshot, visibleRefs: visibleRefs, options: options))
-        issues.append(contentsOf: contrastIssues(in: snapshot, visibleRefs: visibleRefs, options: options))
+        let screenFrame = LoupeRect(
+            x: 0,
+            y: 0,
+            width: snapshot.screen.size.width,
+            height: snapshot.screen.size.height
+        )
+        let activeModalOverlayRefs = activeModalOverlayRefs(in: snapshot, screenFrame: screenFrame)
+        issues.append(contentsOf: duplicateTestIDIssues(in: snapshot, screenFrame: screenFrame))
+        issues.append(contentsOf: interactiveIssues(
+            in: snapshot,
+            screenFrame: screenFrame,
+            activeModalOverlayRefs: activeModalOverlayRefs,
+            options: options
+        ))
+        issues.append(contentsOf: contrastIssues(
+            in: snapshot,
+            screenFrame: screenFrame,
+            activeModalOverlayRefs: activeModalOverlayRefs,
+            options: options
+        ))
 
         for parent in snapshot.nodes.values {
-            guard visibleRefs.contains(parent.ref) else {
-                continue
-            }
-
             let visibleChildren = parent.children
                 .compactMap { snapshot.nodes[$0] }
-                .filter { visibleRefs.contains($0.ref) && $0.frame != nil }
+                .filter { $0.isVisible && $0.frame != nil && intersectsScreen($0, screenFrame: screenFrame) }
 
             if let parentFrame = parent.frame {
                 for child in visibleChildren {
                     guard let childFrame = child.frame else { continue }
-                    guard shouldAuditChildContainment(parent: parent, child: child) else { continue }
-                    if !parentFrame.contains(childFrame, tolerance: options.tolerance) {
+                    guard shouldAuditContainment(parent: parent, child: child, screenFrame: screenFrame) else { continue }
+                    guard
+                        let clippedParentFrame = clipped(parentFrame, to: screenFrame),
+                        let clippedChildFrame = clipped(childFrame, to: screenFrame)
+                    else {
+                        continue
+                    }
+                    if containmentOverflowRatio(parent: clippedParentFrame, child: clippedChildFrame, tolerance: options.tolerance)
+                        > options.minContainmentOverflowRatio {
                         issues.append(
                             LoupeLayoutIssue(
                                 kind: .childOutsideParent,
@@ -170,9 +189,8 @@ public enum LoupeLayoutAuditor {
         return LoupeLayoutAudit(snapshotID: snapshot.id, issues: issues)
     }
 
-    private static func duplicateTestIDIssues(in snapshot: LoupeSnapshot, visibleRefs: Set<String>) -> [LoupeLayoutIssue] {
+    private static func duplicateTestIDIssues(in snapshot: LoupeSnapshot, screenFrame: LoupeRect) -> [LoupeLayoutIssue] {
         let groups = Dictionary(grouping: snapshot.nodes.values.compactMap { node -> (String, LoupeNode)? in
-            guard visibleRefs.contains(node.ref) else { return nil }
             guard let testID = node.testID, !testID.isEmpty else { return nil }
             guard node.isVisible, intersectsScreen(node, screenFrame: screenFrame) else { return nil }
             guard shouldAuditDuplicateTestID(node) else { return nil }
@@ -220,7 +238,7 @@ public enum LoupeLayoutAuditor {
         if isLoupeProbe(first), isLoupeProbe(second) {
             return false
         }
-        if isSystemTabBarItem(first), isSystemTabBarItem(second) {
+        if isSystemTabBarItem(first, in: snapshot), isSystemTabBarItem(second, in: snapshot) {
             return false
         }
         return isOverlapAuditCandidate(first) && isOverlapAuditCandidate(second)
@@ -323,13 +341,6 @@ public enum LoupeLayoutAuditor {
         node.role == "image" || node.uiKit?.imageView != nil
     }
 
-    private static func isScrollContainer(_ node: LoupeNode) -> Bool {
-        return node.role == "scrollView"
-            || node.role == "tableView"
-            || node.role == "collectionView"
-            || node.uiKit?.scrollView != nil
-    }
-
     private static func isLoupeProbe(_ node: LoupeNode) -> Bool {
         if node.typeName == "LoupeWatchProbe" {
             return true
@@ -342,11 +353,12 @@ public enum LoupeLayoutAuditor {
 
     private static func interactiveIssues(
         in snapshot: LoupeSnapshot,
-        visibleRefs: Set<String>,
+        screenFrame: LoupeRect,
+        activeModalOverlayRefs: Set<String>,
         options: LoupeLayoutAuditOptions
     ) -> [LoupeLayoutIssue] {
         snapshot.nodes.values.flatMap { node -> [LoupeLayoutIssue] in
-            guard visibleRefs.contains(node.ref), node.isInteractive, let frame = node.frame else {
+            guard node.isVisible, node.isInteractive, let frame = node.frame else {
                 return []
             }
             guard intersectsScreen(node, screenFrame: screenFrame) else {
@@ -373,7 +385,7 @@ public enum LoupeLayoutAuditor {
             }
 
             let minimumSide = min(frame.width, frame.height)
-            if shouldAuditSmallInteractiveTarget(node), minimumSide < options.minTouchTarget {
+            if shouldAuditTouchTargetSize(node, in: snapshot), minimumSide < options.minTouchTarget {
                 issues.append(
                     LoupeLayoutIssue(
                         kind: .smallInteractiveTarget,
@@ -419,18 +431,30 @@ public enum LoupeLayoutAuditor {
     }
 
     private static func isFocusDecoration(_ node: LoupeNode) -> Bool {
+        guard isAppleRuntime(node) else {
+            return false
+        }
         let className = node.uiKit?.className ?? node.typeName
         return className.hasPrefix("_UIFloatingContent") || className.hasPrefix("_UIFocus")
     }
 
     private static func isTextEditingImplementation(_ node: LoupeNode) -> Bool {
+        guard isAppleRuntime(node) else {
+            return false
+        }
         let className = node.uiKit?.className ?? node.typeName
         return className.hasPrefix("_UIText")
             || className.hasPrefix("_UICursor")
             || className == "UIStandardTextCursorView"
     }
 
-    private static func shouldAuditSmallInteractiveTarget(_ node: LoupeNode) -> Bool {
+    private static func shouldAuditTouchTargetSize(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isSystemOwnedImplementationDetail(node) {
+            return false
+        }
+        if isSystemOwnedCellAccessory(node, in: snapshot) {
+            return false
+        }
         if isSyntheticNode(node) {
             return false
         }
@@ -438,17 +462,13 @@ public enum LoupeLayoutAuditor {
             return false
         }
 
-        let className = node.uiKit?.className ?? node.typeName
-        if className.hasPrefix("_") {
+        if isSystemTabBarItem(node, in: snapshot) {
             return false
         }
-        if className == "UITabBarButton", node.testID == nil {
+        if node.testID == nil, node.uiKit?.segmentedControl != nil {
             return false
         }
-        if className == "UISegmentedControl", node.testID == nil {
-            return false
-        }
-        if className == "UISearchBarTextField", node.testID == nil {
+        if node.testID == nil, node.uiKit?.textField != nil {
             return false
         }
         if isPassiveImageElement(node) {
@@ -458,12 +478,13 @@ public enum LoupeLayoutAuditor {
     }
 
     private static func isPassiveImageElement(_ node: LoupeNode) -> Bool {
-        let className = node.uiKit?.className ?? node.typeName
         let controlEvents = node.uiKit?.control?.controlEvents ?? []
         let gestureRecognizers = node.uiKit?.gestureRecognizers ?? []
-        return node.role == "image"
+        let hasImageSemantics = node.role == "image"
+            || node.uiKit?.imageView != nil
+            || node.accessibility?.traits.contains("image") == true
+        return hasImageSemantics
             && node.testID == nil
-            && (className == "UIImageView" || className.hasSuffix("ImageView"))
             && controlEvents.isEmpty
             && gestureRecognizers.isEmpty
     }
@@ -475,29 +496,41 @@ public enum LoupeLayoutAuditor {
         return false
     }
 
-    private static func isSystemTabBarItem(_ node: LoupeNode) -> Bool {
+    private static func isSystemTabBarItem(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
         guard node.testID == nil else {
             return false
         }
 
-        let className = node.uiKit?.className ?? node.typeName
-        if node.typeName == "UITabBarItem" || className == "_UITabButton" || className == "UITabBarButton" {
+        if hasSyntheticSource("UITabBarItem", node) {
             return true
         }
-        if case .string("UITabBarItem") = node.custom["source"] {
+        if hasAncestorRole("tabBar", node, in: snapshot),
+           node.role == "button" || node.uiKit?.control != nil {
             return true
         }
         return false
     }
 
+    private static func hasSyntheticSource(_ source: String, _ node: LoupeNode) -> Bool {
+        guard case .bool(true) = node.custom["synthetic"],
+              case let .string(nodeSource) = node.custom["source"],
+              nodeSource == source else {
+            return false
+        }
+        return true
+    }
+
     private static func contrastIssues(
         in snapshot: LoupeSnapshot,
-        visibleRefs: Set<String>,
+        screenFrame: LoupeRect,
+        activeModalOverlayRefs: Set<String>,
         options: LoupeLayoutAuditOptions
     ) -> [LoupeLayoutIssue] {
         snapshot.nodes.values.compactMap { node in
             guard
-                visibleRefs.contains(node.ref),
+                node.isVisible,
+                intersectsScreen(node, screenFrame: screenFrame),
+                shouldAuditNodeInModalContext(node, activeModalOverlayRefs: activeModalOverlayRefs, snapshot: snapshot),
                 shouldAuditTextContrast(node, in: snapshot),
                 LoupeObservationCompactor.displayText(for: node) != nil,
                 let textColor = node.style?.textColor,
@@ -528,20 +561,16 @@ public enum LoupeLayoutAuditor {
     }
 
     private static func isTextFieldPlaceholderLabel(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
-        guard node.testID == nil, node.role == "staticText" else {
-            return false
-        }
-
-        let className = node.uiKit?.className ?? node.typeName
-        guard className.hasSuffix("TextFieldLabel") else {
+        guard node.testID == nil,
+              node.role == "staticText",
+              node.uiKit?.label != nil else {
             return false
         }
 
         guard let parentRef = node.parentRef, let parent = snapshot.nodes[parentRef] else {
             return false
         }
-        let parentClassName = parent.uiKit?.className ?? parent.typeName
-        guard parent.role == "textField" || parentClassName.hasSuffix("TextField") else {
+        guard parent.role == "textField" || parent.uiKit?.textField != nil else {
             return false
         }
 
@@ -748,7 +777,7 @@ public enum LoupeLayoutAuditor {
         if node.role == "navigationBar" || node.role == "tabBar" || node.role == "toolbar" {
             return true
         }
-        if node.kind == .barButtonItem || node.kind == .tabBarItem {
+        if hasSyntheticSource("UIBarButtonItem", node) || hasSyntheticSource("UITabBarItem", node) {
             return true
         }
         return isSystemOwnedPassiveDecoration(node)
