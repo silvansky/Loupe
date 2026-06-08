@@ -1046,7 +1046,7 @@ public enum LoupeDesignComparator {
         guard isProbeBackedNode(node, snapshot: snapshot) else {
             return false
         }
-        if node.custom["loupe.probe"] == .bool(true) || isProbeTypeName(node.typeName) {
+        if node.hasLoupeProbeMetadata || node.hasLoupeProbeTypeName {
             return true
         }
         if hasOwnTextContent(node) || node.accessibility?.isElement == true {
@@ -1099,32 +1099,19 @@ public enum LoupeDesignComparator {
     }
 
     private static func isProbeBackedNode(_ node: LoupeNode, snapshot: LoupeSnapshot) -> Bool {
-        if node.custom["loupe.probe"] == .bool(true) {
-            return true
-        }
-        if isProbeTypeName(node.typeName) {
+        if node.isLoupeProbeMarker {
             return true
         }
         var current = node
         var depth = 0
         while depth < 4, let parentRef = current.parentRef, let parent = snapshot.nodes[parentRef] {
-            if parent.custom["loupe.probe"] == .bool(true) ||
-                isProbeTypeName(parent.typeName) {
+            if parent.isLoupeProbeMarker {
                 return true
             }
             current = parent
             depth += 1
         }
         return false
-    }
-
-    private static func isProbeTypeName(_ typeName: String) -> Bool {
-        let lowercased = typeName.lowercased()
-        if lowercased.contains("loupeprobe") {
-            return true
-        }
-        return lowercased.contains("platformviewrepresentableadaptor<")
-            && lowercased.contains("probe")
     }
 
     private static func isPlaceholderTextStyle(_ style: LoupeStyle?) -> Bool {

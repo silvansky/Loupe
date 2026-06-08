@@ -427,13 +427,7 @@ public enum LoupeLayoutAuditor {
     }
 
     private static func isLoupeProbe(_ node: LoupeNode) -> Bool {
-        if node.typeName == "LoupeWatchProbe" {
-            return true
-        }
-        if case .bool(true) = node.custom["loupe.probe"] {
-            return true
-        }
-        return false
+        node.isLoupeProbeMarker
     }
 
     private static func interactiveIssues(
@@ -534,6 +528,9 @@ public enum LoupeLayoutAuditor {
     }
 
     private static func shouldAuditTouchTargetSize(_ node: LoupeNode, in snapshot: LoupeSnapshot) -> Bool {
+        if isLoupeProbe(node) {
+            return false
+        }
         if isSystemOwnedImplementationDetail(node) {
             return false
         }

@@ -81,12 +81,18 @@ screenshots when supported; macOS host runtimes may need JSON-only proof.
 
 - Import path: public `.loupeProbe(...)` from `LoupeKit`.
 - No-import path: local `UIViewRepresentable`/`NSViewRepresentable` fallback
-  with accessibility identifier/label/traits.
+  with accessibility identifier/label/traits and `testProperty("loupe.probe",
+  true)` when LoupeCore helpers are available.
 - Notification path: post `dev.loupe.probe` / `dev.loupe.removeProbe` with
   measured bounds. Synthetic nodes are structural locators, not platform views,
   so activation and mutation can correctly fail.
 - Probe payload keys: `id`, `label`, `role`, `frame` with `x/y/width/height`,
   and optional `isInteractive`.
+- For design comparison, use the design node ID as the probe ID when possible.
+  If the probe represents visible text, keep `label` equal to the exact visible
+  text. Put state like "selected" in metadata or result notes, not in the label.
+  Use broad-region probes only for broad design nodes; do not let a row probe
+  stand in for a screen surface or header container.
 
 ## Diagnostics
 

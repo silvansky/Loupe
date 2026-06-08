@@ -2426,6 +2426,70 @@ struct DesignComparisonTests {
         #expect(comparison.issues.isEmpty)
     }
 
+    @Test func appAuthoredProbeControlDoesNotCreatePlaceholderStyleNoise() {
+        let snapshot = LoupeSnapshot(
+            id: "app-authored-probe-control",
+            capturedAt: Date(timeIntervalSince1970: 0),
+            screen: LoupeScreen(size: LoupeSize(width: 393, height: 852), scale: 3),
+            rootRefs: ["root"],
+            nodes: [
+                "root": LoupeNode(
+                    ref: "root",
+                    parentRef: nil,
+                    kind: .application,
+                    typeName: "YumQuick",
+                    frame: LoupeRect(x: 0, y: 0, width: 393, height: 852),
+                    isVisible: true,
+                    isEnabled: true,
+                    isInteractive: false,
+                    children: ["tab"]
+                ),
+                "tab": LoupeNode(
+                    ref: "tab",
+                    parentRef: "root",
+                    kind: .view,
+                    typeName: "ProbeControl",
+                    role: "button",
+                    testID: "contact.tab.faq.probe",
+                    label: "FAQ",
+                    text: "FAQ",
+                    frame: LoupeRect(x: 35, y: 161, width: 155, height: 28),
+                    isVisible: true,
+                    isEnabled: true,
+                    isInteractive: true
+                ),
+            ]
+        )
+        let design = LoupeDesignDocument(
+            frame: LoupeDesignFrame(name: "Contact", width: 393, height: 852),
+            nodes: [
+                LoupeDesignNode(
+                    id: "contact.tab.faq",
+                    name: "FAQ tab",
+                    role: "button",
+                    text: "FAQ",
+                    frame: LoupeRect(x: 35, y: 161, width: 155, height: 28),
+                    style: LoupeDesignStyle(
+                        backgroundColor: "#F9D8CE",
+                        textColor: "#F45124",
+                        cornerRadius: 14,
+                        fontName: "System Medium",
+                        fontSize: 14
+                    )
+                ),
+            ]
+        )
+
+        let comparison = LoupeDesignComparator.compare(snapshot: snapshot, design: design)
+
+        #expect(comparison.matchedCount == 1)
+        #expect(!comparison.issues.contains { $0.kind == .backgroundColorDelta })
+        #expect(!comparison.issues.contains { $0.kind == .cornerRadiusDelta })
+        #expect(!comparison.issues.contains { $0.kind == .textColorDelta })
+        #expect(!comparison.issues.contains { $0.kind == .fontNameDelta })
+        #expect(!comparison.issues.contains { $0.kind == .fontSizeDelta })
+    }
+
     @Test func probeBackedMeaningfulUnexpectedChildStillReportsUnexpectedNode() {
         let snapshot = LoupeSnapshot(
             id: "probe-backed-unexpected-child",

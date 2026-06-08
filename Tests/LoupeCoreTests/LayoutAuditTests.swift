@@ -1506,6 +1506,46 @@ struct LayoutAuditTests {
         #expect(!audit.issues.contains { $0.kind == .childOutsideParent })
     }
 
+    @Test func auditIgnoresAppAuthoredProbeControlTargetSizeNoise() {
+        let snapshot = LoupeSnapshot(
+            id: "probe-control-target-size",
+            capturedAt: Date(timeIntervalSince1970: 0),
+            screen: LoupeScreen(size: LoupeSize(width: 393, height: 852), scale: 3),
+            rootRefs: ["root"],
+            nodes: [
+                "root": LoupeNode(
+                    ref: "root",
+                    parentRef: nil,
+                    kind: .application,
+                    typeName: "UIApplication",
+                    role: "application",
+                    frame: LoupeRect(x: 0, y: 0, width: 393, height: 852),
+                    isVisible: true,
+                    isEnabled: true,
+                    isInteractive: false,
+                    children: ["probe"]
+                ),
+                "probe": LoupeNode(
+                    ref: "probe",
+                    parentRef: "root",
+                    kind: .view,
+                    typeName: "ProbeControl",
+                    role: "button",
+                    testID: "probe_disclosure_instagram",
+                    text: "Instagram disclosure",
+                    frame: LoupeRect(x: 334, y: 471, width: 13, height: 8),
+                    isVisible: true,
+                    isEnabled: true,
+                    isInteractive: true
+                ),
+            ]
+        )
+
+        let audit = LoupeLayoutAuditor.audit(snapshot)
+
+        #expect(!audit.issues.contains { $0.kind == .smallInteractiveTarget })
+    }
+
     private func button(ref: String, testID: String?, frame: LoupeRect) -> LoupeNode {
         LoupeNode(
             ref: ref,
