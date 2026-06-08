@@ -563,7 +563,7 @@ struct DesignComparisonTests {
                     isVisible: true,
                     isEnabled: true,
                     isInteractive: false,
-                    children: ["wide", "shifted"]
+                    children: ["wide", "centered", "offcenter"]
                 ),
                 "wide": LoupeNode(
                     ref: "wide",
@@ -578,8 +578,8 @@ struct DesignComparisonTests {
                     isEnabled: true,
                     isInteractive: false
                 ),
-                "shifted": LoupeNode(
-                    ref: "shifted",
+                "centered": LoupeNode(
+                    ref: "centered",
                     parentRef: "root",
                     kind: .view,
                     typeName: "NSTextField",
@@ -587,6 +587,19 @@ struct DesignComparisonTests {
                     testID: "admin.priority.low",
                     text: "Low",
                     frame: LoupeRect(x: 763, y: 628, width: 35, height: 15),
+                    isVisible: true,
+                    isEnabled: true,
+                    isInteractive: false
+                ),
+                "offcenter": LoupeNode(
+                    ref: "offcenter",
+                    parentRef: "root",
+                    kind: .view,
+                    typeName: "NSTextField",
+                    role: "staticText",
+                    testID: "admin.priority.offcenter",
+                    text: "Low",
+                    frame: LoupeRect(x: 750, y: 656, width: 35, height: 15),
                     isVisible: true,
                     isEnabled: true,
                     isInteractive: false
@@ -610,17 +623,27 @@ struct DesignComparisonTests {
                     text: "Low",
                     frame: LoupeRect(x: 770, y: 628, width: 22, height: 15)
                 ),
+                LoupeDesignNode(
+                    id: "admin.priority.offcenter",
+                    name: "Off-center Low badge",
+                    role: "staticText",
+                    text: "Low",
+                    frame: LoupeRect(x: 770, y: 656, width: 22, height: 15)
+                ),
             ]
         )
 
         let comparison = LoupeDesignComparator.compare(snapshot: snapshot, design: design)
 
-        #expect(comparison.matchedCount == 2)
+        #expect(comparison.matchedCount == 3)
         #expect(!comparison.issues.contains { issue in
             issue.kind == .frameDelta && issue.designID == "admin.sidebar.dashboard"
         })
-        #expect(comparison.issues.contains { issue in
+        #expect(!comparison.issues.contains { issue in
             issue.kind == .frameDelta && issue.designID == "admin.priority.low"
+        })
+        #expect(comparison.issues.contains { issue in
+            issue.kind == .frameDelta && issue.designID == "admin.priority.offcenter"
         })
     }
 

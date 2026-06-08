@@ -876,7 +876,10 @@ public enum LoupeDesignComparator {
             return false
         }
         let expected = designNode.frame
-        guard abs(expected.x - appFrame.x) <= tolerance,
+        let centerTolerance = max(tolerance, 3)
+        let horizontalPositionMatches = abs(expected.x - appFrame.x) <= tolerance
+            || abs(expected.center.x - appFrame.center.x) <= centerTolerance
+        guard horizontalPositionMatches,
               abs(expected.y - appFrame.y) <= tolerance,
               abs(expected.height - appFrame.height) <= tolerance else {
             return false
