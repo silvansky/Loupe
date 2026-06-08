@@ -595,7 +595,11 @@ struct LoupeCLI {
             LoupeDesignComparison.self,
             from: Data(contentsOf: options.compareURL)
         )
-        let selectedSuggestions = options.selectedSuggestions(from: comparison.suggestions)
+        let referenceSnapshot = try options.snapshotURL.map { try decodeSnapshot(from: $0) }
+        let selectedSuggestions = options.selectedSuggestions(
+            from: comparison.suggestions,
+            referenceSnapshot: referenceSnapshot
+        )
         guard !selectedSuggestions.isEmpty else {
             throw CLIError("apply-design-suggestions found no suggestions matching the requested filters")
         }
@@ -666,7 +670,6 @@ struct LoupeCLI {
             try await validateRuntimeIdentity(host: host, expectedUDID: udid, timeout: options.timeout)
         }
 
-        let referenceSnapshot = try options.snapshotURL.map { try decodeSnapshot(from: $0) }
         var liveSnapshot = try await fetchSnapshot(host: host, timeout: options.timeout)
         let before = liveSnapshot
         try writeSnapshot(before, to: beforeURL)

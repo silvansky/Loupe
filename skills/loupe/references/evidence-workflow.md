@@ -70,8 +70,15 @@ screenshots when supported; macOS host runtimes may need JSON-only proof.
   the raw hosting tree is sparse, add minimal debug-only probes to expose
   intended bounds and identifiers, then record that comparison is probe-backed.
   Probe-backed `compare-design=0` is structural proof, not visual proof.
-- Transparent probe overlays can create overlap or small-target audit noise.
-  Separate that synthetic noise from real visual, accessibility, and interaction
+- Do not create invisible overlay controls with product `testID`s as a probe
+  fallback. Use the public `.loupeProbe(...)`, a local representable fallback
+  that sets `loupe.probe=true`, or registered probe notifications so Loupe can
+  classify the nodes as synthetic.
+- Probe nodes should be noninteractive unless the probe specifically represents
+  an action target. Avoid hidden buttons/text fields as bounds probes; they add
+  false small-target and overlap noise.
+- If transparent probe overlays are unavoidable, record them as a limitation and
+  separate that synthetic noise from real visual, accessibility, and interaction
   issues in the result.
 - Treat `ui audit` on SwiftUI-hosted internals as triage. Empty
   `ui reflect sourceCandidates` can be correct for framework wrappers or

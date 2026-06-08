@@ -810,7 +810,7 @@ public struct LoupeNode: Codable, Equatable {
 }
 
 extension LoupeNode {
-    var isLoupeProbeMarker: Bool {
+    public var isLoupeProbeMarker: Bool {
         hasLoupeProbeMetadata || hasLoupeProbeTypeName || isAppAuthoredLoupeProbeControl
     }
 
