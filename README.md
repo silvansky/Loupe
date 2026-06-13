@@ -46,6 +46,7 @@ Why use Loupe:
 
 ```bash
 brew tap heoblitz/loupe https://github.com/heoblitz/Loupe.git
+brew trust heoblitz/loupe
 brew install loupe
 ```
 
